@@ -31,11 +31,10 @@ namespace {
               ConstantExpr *ce = cast<ConstantExpr>(fnCall->getOperand(1));
               if (ce) {
                 if (ce->getOpcode() == Instruction::GetElementPtr) {
-                  if (GlobalVariable *annoteStr =
-                      dyn_cast<GlobalVariable>(ce->getOperand(0))) {
-                    if (ConstantDataSequential *data =
-                        dyn_cast<ConstantDataSequential>(
-                          annoteStr->getInitializer())) {
+                  GlobalVariable *annotateStr = dyn_cast<GlobalVariable>(ce->getOperand(0));
+                  if (annotateStr) {
+                    ConstantDataSequential *data = dyn_cast<ConstantDataSequential>( annotateStr->getInitializer());
+                    if (data) {
                       if (data->isString()) {
                         /* errs() << "Found data '" << data->getAsString() << "'"; */
                         isNospecAnnotation = data->getAsCString().equals("nospec");
