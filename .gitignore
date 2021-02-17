@@ -5,3 +5,4 @@ src/CMakeFiles
 *.cmake
 *.o
 *.so
+a.out

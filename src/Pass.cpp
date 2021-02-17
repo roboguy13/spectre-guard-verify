@@ -37,7 +37,7 @@ namespace {
                         dyn_cast<ConstantDataSequential>(
                           annoteStr->getInitializer())) {
                       if (data->isString()) {
-                        errs() << "Found data '" << data->getAsString() << "'";
+                        /* errs() << "Found data '" << data->getAsString() << "'"; */
                         isNospecAnnotation = data->getAsCString().equals("nospec");
                       }
                     }
@@ -46,6 +46,8 @@ namespace {
               }
 
               errs() << "\t--- Is nospec annotation: " << isNospecAnnotation << "\n";
+              errs() << "\t--- On '" << fnCall->getOperand(0) << "'\n";
+              /* fnCall->getOperand(0)->printAsOperand(errs()); */
             }
           }
         }
