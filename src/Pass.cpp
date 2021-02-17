@@ -24,6 +24,28 @@ namespace {
             errs() << "*** CallInst with name: " << fnCall->getCalledFunction()->getName() << "\n";
             if (fnCall->getCalledFunction()->getName().equals("llvm.var.annotation")) {
               errs() << "+++ Annotation call\n";
+
+              bool isNospecAnnotation = false;
+
+              // See https://stackoverflow.com/a/46297366
+              ConstantExpr *ce = cast<ConstantExpr>(fnCall->getOperand(1));
+              if (ce) {
+                if (ce->getOpcode() == Instruction::GetElementPtr) {
+                  if (GlobalVariable *annoteStr =
+                      dyn_cast<GlobalVariable>(ce->getOperand(0))) {
+                    if (ConstantDataSequential *data =
+                        dyn_cast<ConstantDataSequential>(
+                          annoteStr->getInitializer())) {
+                      if (data->isString()) {
+                        errs() << "Found data '" << data->getAsString() << "'";
+                        isNospecAnnotation = data->getAsCString().equals("nospec");
+                      }
+                    }
+                  }
+                }
+              }
+
+              errs() << "\t--- Is nospec annotation: " << isNospecAnnotation << "\n";
             }
           }
         }
