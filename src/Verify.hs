@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TupleSections #-}
 
 {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
@@ -21,6 +22,8 @@ newNodeId = do
 
   return $ NodeId x
 
+
+
 main :: IO ()
 main = do
   let fileName = "../test.c"
@@ -30,7 +33,7 @@ main = do
   case parseC stream (initPos fileName) of
     Left err -> error (show err)
     Right parsed -> do
-      let parsed' = flip runState (NodeId 0) $ traverse (const newNodeId) parsed
+      let parsed' = flip runState (NodeId 0) $ traverse (\x -> fmap (x,) newNodeId) parsed
 
       print parsed'
 
