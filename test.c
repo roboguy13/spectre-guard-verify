@@ -1,7 +1,8 @@
-int test(int x) {
+int test() {
   int y __attribute__((nospec));
+  int x;
   y = 1;
-  for (int i = 0; i < x; ++i) {
-    y *= x;
+  if (y == 0) {
+    x = 3;
   }
 }

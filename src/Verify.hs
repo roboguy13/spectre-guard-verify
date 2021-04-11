@@ -21,6 +21,8 @@ import           Control.Monad.Writer
 import           Data.Generics.Uniplate.Data
 import           Data.Data
 
+import           Data.Bifunctor
+
 import           Orphans ()
 
 newtype NodeId = NodeId { getNodeId :: Integer }
@@ -45,7 +47,7 @@ class Ppr a where
   ppr :: a -> String
 
 instance Ppr NodeId where
-  ppr = show . getNodeId
+  ppr = ('n':) . show . getNodeId
 
 data Sensitivity = Public | Secret
   deriving (Show)
@@ -76,7 +78,7 @@ data SetExpr
 
 instance Ppr SetExpr where
   ppr (SE_Atom x) = ppr x
-  ppr (SE_Union x y) = "(" ++ ppr x ++ ") U (" ++ ppr y ++ ")"
+  ppr (SE_Union x y) = ppr x ++ " U " ++ ppr y
   ppr (SE_IfThenElse (x,y) t f) = "if (" ++ ppr x ++ " = " ++ ppr y ++ ") then " ++ ppr t ++ " else " ++ ppr f
 
 type SetConstraints = [SetConstraint]
@@ -159,7 +161,7 @@ handleCompoundItem (CBlockDecl (CDecl _ xs _)) = mapM_ go xs
     go (Just declr, _, _) = handleDeclarator declr
     go _ = pure ()
 handleCompoundItem (CBlockDecl {}) = pure ()
-handleCompoundItem (CBlockStmt stmt) = handleStmt stmt
+handleCompoundItem (CBlockStmt stmt) = pure () --handleStmt stmt
 handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
 handleExpr :: CExpression NodeId -> ConstraintGen ()
@@ -220,7 +222,7 @@ handleStmt (CCompound _ items _) = do
       tell [ c_entry (annotation y) :=: c_exit (annotation x) ]
       go (y:rest)
 
-handleStmt _ = pure ()
+handleStmt e = pure () --mapM_ handleStmt $ drop 1 $ universe e
 
 handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
 handleFunDef (CFunDef _ _ _ stmt _) = void $ transformM (constAction handleStmt) stmt
@@ -232,6 +234,21 @@ handleExtDecl _ = pure ()
 handleTransUnit :: (CTranslationUnit NodeId, NodeId) -> ConstraintGen ()
 handleTransUnit (CTranslUnit xs _, _) = void $ traverse handleExtDecl xs
 
+nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
+nodeIdToLoc transUnit nodeId =
+  (nodeId, fmap posOf . lookup nodeId $ foldMap (\(info, nodeId') -> [(nodeId', info)]) transUnit)
+
+nodeIdLocInfo :: [(NodeId, Maybe Position)] -> String
+nodeIdLocInfo = unlines . map go
+  where
+    go (nodeId, pos_maybe) = ppr nodeId ++ ": " ++
+      case pos_maybe of
+        Nothing -> "<no position info>"
+        Just pos -> show pos
+
+getAnns :: CTranslationUnit a -> [a]
+getAnns = foldMap (:[])
+
 main :: IO ()
 main = do
   let fileName = "../test.c"
@@ -241,8 +258,12 @@ main = do
   case parseC stream (initPos fileName) of
     Left err -> error (show err)
     Right parsed -> do
-      let parsed' = flip runState (NodeId 0) $ traverse (\_ -> newNodeId) parsed
-          constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed'
+      let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
+          parsed'' = first (fmap snd) parsed'
+          constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
+          nodeInfo = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
       putStrLn $ ppr constraints
+      putStrLn (nodeIdLocInfo nodeInfo)
+      print parsed'
 
