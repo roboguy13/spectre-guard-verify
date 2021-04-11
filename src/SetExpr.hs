@@ -75,6 +75,48 @@ data AtomicSet
   | SingleVar Int
   deriving (Show)
 
+class ExprConstNames a where
+  getVars :: a -> [Int]
+  getNodeIds :: a -> [NodeId]
+
+instance ExprConstNames SensExpr where
+  getVars _ = []
+  getNodeIds (SensAtom _) = []
+  getNodeIds (Sens_T x y) = [x, y]
+
+instance ExprConstNames SetExpr where
+  getVars (SE_Atom x) = getVars x
+  getVars (SE_Union x y) = getVars x ++ getVars y
+  getVars (SE_UnionSingle x v s) = getVars x ++ [v] ++ getVars s
+  getVars (SE_IfThenElse (sA, sB) x y) = getVars sA ++ getVars sB ++ getVars x ++ getVars y
+
+  getNodeIds (SE_Atom x) = getNodeIds x
+  getNodeIds (SE_Union x y) = getNodeIds x ++ getNodeIds y
+  getNodeIds (SE_UnionSingle x v s) = getNodeIds x ++ getNodeIds s
+  getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA ++ getNodeIds sB ++ getNodeIds x ++ getNodeIds y
+
+instance ExprConstNames AtomicSet where
+  getVars (SetFamily sf) = getVars sf
+  getVars (SingleVar v) = [v]
+
+  getNodeIds (SetFamily sf) = getNodeIds sf
+  getNodeIds (SingleVar _) = []
+
+instance ExprConstNames SetFamily where
+  getVars _ = []
+  getNodeIds (C_Exit' x) = [x]
+  getNodeIds (C_Entry' x) = [x]
+  getNodeIds (Atom_S' x y) = [x, y]
+  getNodeIds (Atom_E' x) = [x]
+
+instance ExprConstNames SetConstraint where
+  getVars (x :=: y) = getVars x ++ getVars y
+  getNodeIds (x :=: y) = getNodeIds x ++ getNodeIds y
+
+instance ExprConstNames SetConstraints where
+  getVars = concatMap getVars
+  getNodeIds = concatMap getNodeIds
+
 pattern C_Exit x = SetFamily (C_Exit' x)
 pattern C_Entry x = SetFamily (C_Entry' x)
 pattern Atom_S x y = SetFamily (Atom_S' x y)

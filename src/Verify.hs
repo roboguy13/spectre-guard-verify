@@ -10,8 +10,9 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE LambdaCase #-}
 
--- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
+{-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
 import           Language.C
 import           Language.C.Data.Ident
@@ -31,74 +32,122 @@ import           Ppr
 import           SetExpr
 import           ConstraintGen
 
-data Z3Name where
-  Z3_C_Exit :: Z3Name
-  Z3_C_Entry :: Z3Name
-  Z3_S :: Z3Name
-  Z3_E :: Z3Name
-  Z3_T :: Z3Name
-  Z3_Node :: NodeId -> Z3Name
-  Z3_Var :: Int -> Z3Name
-  Z3_Sens :: Sensitivity -> Z3Name
-
-deriving instance Show Z3Name
-deriving instance Eq Z3Name
-
--- class HEq f where
---   heq :: f a -> f b -> Maybe (a :~: b)
-
--- data DPair f g = forall t. DPair (f t) (g t)
-
--- instance HEq Z3Name where
---   heq Z3_C_Exit Z3_C_Exit = Just Refl
---   heq Z3_C_Entry Z3_C_Entry = Just Refl
---   heq Z3_S Z3_S = Just Refl
---   heq Z3_E Z3_E = Just Refl
---   heq Z3_T Z3_T = Just Refl
---   heq (Z3_Node x) (Z3_Node y)
---     | x == y = Just Refl
---   heq (Z3_Var x) (Z3_Var y)
---     | x == y = Just Refl
---   heq _ _ = Nothing
-
 data Z3Sort = Sens_Sort | Var_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
   Z3Info
-  { z3Info_assocs :: [(Z3Name, FuncDecl)]
-  , z3Info_sorts :: [(Z3Sort, Sort)]
+  { z3Info_setFamilyDecls :: SetFamily -> FuncDecl
+  , z3Info_sensExprDecls :: SensExpr -> FuncDecl
+  , z3Info_varDecls :: Int -> FuncDecl
+  , z3Info_nodeDecls :: NodeId -> FuncDecl
+  , z3Info_sorts :: Z3Sort -> Sort
   }
 
 newtype Z3Converter a = Z3Converter (ReaderT Z3Info Z3 a)
   deriving (Functor, Applicative, Monad, MonadReader Z3Info, MonadZ3, MonadIO)
 
--- dpairLookup :: (HEq f) => f t -> [DPair f g] -> Maybe (g t)
--- dpairLookup _ [] = Nothing
--- dpairLookup x (DPair ft gt:rest) =
---   case heq ft x of
---     Just Refl -> Just gt
---     Nothing -> dpairLookup x rest
+defineZ3Names :: [Int] -> [NodeId] -> Z3 Z3Info
+defineZ3Names vars nodeIds = do
+    let makeSyms str = mapM (\x -> mkStringSymbol (str ++ show x))
+        nodeIdNums = map getNodeId nodeIds
 
--- newtype Z3Thing a = Z3Thing a
+    c_exit_syms <- makeSyms "C_exit" nodeIdNums
+    c_entry_syms <- makeSyms "C_entry" nodeIdNums
+    s_syms <- makeSyms "S" nodeIdNums
+    t_syms <- makeSyms "T" nodeIdNums
 
-lookupZ3Name :: Z3Name -> Z3Converter FuncDecl
-lookupZ3Name name = do
-  xs <- fmap z3Info_assocs ask
-  case lookup name xs of
-    Just r -> pure r
-    Nothing -> error $ "lookupZ3Name: Internal error: Cannot find name " ++ show name
+    e_syms <- makeSyms "E" nodeIdNums
+
+    node_syms <- makeSyms "n" nodeIdNums
+    var_syms <- makeSyms "v" vars
+    sens_syms <- mapM mkStringSymbol ["public", "secret"]
+
+    node_recog_syms <- makeSyms "is_n" nodeIdNums
+    var_recog_syms <- makeSyms "is_v" nodeIdNums
+    sens_recog_syms <- mapM mkStringSymbol ["is_public", "is_secret"]
+
+    let buildConstructors = mapM (\(n, recog) -> mkConstructor n recog [])
+
+    node_constructors <- buildConstructors (zip node_syms node_recog_syms)
+    var_constructors <- buildConstructors (zip var_syms var_recog_syms)
+
+    sens_constructors <- buildConstructors (zip sens_syms sens_recog_syms)
+
+    node_type_sym <- mkStringSymbol "Node"
+    var_type_sym <- mkStringSymbol "Var"
+    sens_type_sym <- mkStringSymbol "Sensitivity"
+
+    node_sort <- mkDatatype node_type_sym node_constructors
+    var_sort <- mkDatatype var_type_sym var_constructors
+    sens_sort <- mkDatatype sens_type_sym sens_constructors
+
+    node_fns <- zip nodeIds <$> getDatatypeSortConstructors node_sort
+    var_fns <- zip vars <$> getDatatypeSortConstructors var_sort
+    [public_fn, secret_fn] <- getDatatypeSortConstructors sens_sort
+
+    bool_sort <- mkBoolSort
+
+    let buildFn sorts = mapM (\n -> mkFuncDecl n sorts bool_sort)
+
+    c_exit_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_exit_syms
+    c_entry_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_entry_syms
+    s_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort, node_sort] s_syms
+    t_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort, node_sort] t_syms
+
+    e_fns <- zip nodeIds <$> buildFn [var_sort] e_syms
+
+    let lookup' x xs =
+          case lookup x xs of
+            Nothing -> error $ "defineZ3Names: Internal Z3 lookup failed: " ++ show x
+            Just z -> z
+
+    return $ Z3Info
+       { z3Info_setFamilyDecls = \case
+            C_Exit' n -> lookup' n c_exit_fns
+            C_Entry' n -> lookup' n c_entry_fns
+            Atom_S' x _y -> lookup' x s_fns
+            Atom_E' x -> lookup' x e_fns
+
+       , z3Info_sensExprDecls = \case
+            SensAtom Public -> public_fn
+            SensAtom Secret -> secret_fn
+            Sens_T x _y -> lookup' x t_fns
+
+       , z3Info_varDecls = \v -> lookup' v var_fns
+       , z3Info_nodeDecls = \n -> lookup' n node_fns
+       , z3Info_sorts = \case
+          Sens_Sort -> sens_sort
+          Var_Sort -> var_sort
+          Node_Sort -> node_sort
+       }
+
+evalZ3Converter :: [Int] -> [NodeId] -> Z3Converter a -> IO a
+evalZ3Converter vars nodeIds (Z3Converter conv) = evalZ3 $ do
+  z3Info <- defineZ3Names vars nodeIds
+  runReaderT conv z3Info
+
+class Z3FuncDecl a where
+  lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
+
+instance Z3FuncDecl SetFamily where
+  lookupZ3FuncDecl = lookupZ3' z3Info_setFamilyDecls
+
+instance Z3FuncDecl SensExpr where
+  lookupZ3FuncDecl = lookupZ3' z3Info_sensExprDecls
+
+instance Z3FuncDecl Int where
+  lookupZ3FuncDecl = lookupZ3' z3Info_varDecls
+
+instance Z3FuncDecl NodeId where
+  lookupZ3FuncDecl = lookupZ3' z3Info_nodeDecls
+
+lookupZ3' :: (Z3Info -> (a -> r)) -> a -> Z3Converter r
+lookupZ3' accessor x = do
+  f <- fmap accessor ask
+  return $ f x
 
 lookupZ3Sort :: Z3Sort -> Z3Converter Sort
-lookupZ3Sort s = do
-  xs <- fmap z3Info_sorts ask
-  case lookup s xs of
-    Just r -> pure r
-    Nothing -> error $ "lookupZ3Sort: Internal error: Cannot find sort " ++ show s
-
--- z3App :: Typeable a => Z3Name a -> [AST] -> Z3Converter (Z3 AST)
--- z3App name xs = do
---   z3Thing <- lookupZ3Name name
---   mkApp
+lookupZ3Sort = lookupZ3' z3Info_sorts
 
 mkAppM :: MonadZ3 z3 => FuncDecl -> [z3 AST] -> z3 AST
 mkAppM decl = z3M (mkApp decl)
@@ -108,25 +157,25 @@ z3M f argsM =
   f =<< sequence argsM
 
 lookupSetFamilyFn :: SetFamily -> Z3Converter (FuncDecl, [AST])
-lookupSetFamilyFn (C_Exit' n) = do
-  f <- lookupZ3Name Z3_C_Exit
+lookupSetFamilyFn sf@(C_Exit' n) = do
+  f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 n]
 
-lookupSetFamilyFn (C_Entry' n) = do
-  f <- lookupZ3Name Z3_C_Entry
+lookupSetFamilyFn sf@(C_Entry' n) = do
+  f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 n]
 
-lookupSetFamilyFn (Atom_S' x y) = do
-  f <- lookupZ3Name Z3_S
+lookupSetFamilyFn sf@(Atom_S' x y) = do
+  f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 x, toZ3 y]
 
-lookupSetFamilyFn (Atom_E' x) = do
-  f <- lookupZ3Name Z3_E
+lookupSetFamilyFn sf@(Atom_E' x) = do
+  f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 x]
 
 applyFamilyFnM :: SetFamily -> [Z3Converter AST] -> Z3Converter AST
-applyFamilyFnM sf restArgs = do
-  (sf, args) <- lookupSetFamilyFn sf
+applyFamilyFnM sf0 restArgs = do
+  (sf, args) <- lookupSetFamilyFn sf0
   mkAppM sf (map pure args ++ restArgs)
 
 class Z3SetRelation a where
@@ -145,10 +194,13 @@ instance Z3SetRelation AtomicSet where
 
 instance Z3SetRelation SetExpr where
   applySetRelation (SE_Atom sr) args = applySetRelation sr args
+
   applySetRelation (SE_Union x y) args = do
     z3M mkOr [applySetRelation x args, applySetRelation y args]
-  applySetRelation (SE_UnionSingle x v s) args =
+
+  applySetRelation (SE_UnionSingle x v s) _args =
     applySetRelationM x [toZ3 v, toZ3 s]
+
   applySetRelation (SE_IfThenElse (sensX, sensY) t f) args = do
     z3_sensX <- toZ3 sensX
     z3_sensY <- toZ3 sensY
@@ -161,27 +213,6 @@ instance Z3SetRelation SetExpr where
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
 
--- instance ToZ3 SetFamily where
---   toZ3 (C_Exit' n) = do
---     z3_c_exit <- lookupZ3Name Z3_C_Exit
---     mkAppM z3_c_exit [toZ3 n]
-
---   toZ3 (C_Entry' n) = do
---     z3_c_entry <- lookupZ3Name Z3_C_Entry
---     mkAppM z3_c_entry [toZ3 n]
-
---   toZ3 (Atom_S' x y) = do
---     z3_s <- lookupZ3Name Z3_S
---     mkAppM z3_s [toZ3 x, toZ3 y]
-
---   toZ3 (Atom_E' x) = do
---     z3_e <- lookupZ3Name Z3_E
---     mkAppM z3_e [toZ3 x]
-
--- instance ToZ3 SetExpr where
---   toZ3 (Single n sens) = 
-
--- instance ToZ3 
 
 mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, Symbol, AST)
 mkSymVar name z3sort = do
@@ -191,17 +222,17 @@ mkSymVar name z3sort = do
   return (sort, sym, var)
 
 instance ToZ3 NodeId where
-  toZ3 n = join $ mkApp <$> lookupZ3Name (Z3_Node n) <*> pure []
+  toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
 
 instance ToZ3 Int where
-  toZ3 n = join $ mkApp <$> lookupZ3Name (Z3_Var n) <*> pure []
+  toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
 
 instance ToZ3 SensExpr where
-  toZ3 (SensAtom s) =
-    join $ mkApp <$> (lookupZ3Name (Z3_Sens s)) <*> pure []
+  toZ3 s@(SensAtom _) =
+    join $ mkApp <$> (lookupZ3FuncDecl s) <*> pure []
 
-  toZ3 (Sens_T x y) = do
-    z3_t <- lookupZ3Name Z3_T
+  toZ3 s@(Sens_T x y) = do
+    z3_t <- lookupZ3FuncDecl s
     mkAppM z3_t [toZ3 x, toZ3 y]
 
 
@@ -213,6 +244,12 @@ instance ToZ3 SetConstraint where
 
     mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
       =<< join (mkEq <$> applyFamilyFnM lhs [pure v_var, pure s_var] <*> applyFamilyFnM x [pure v_var, pure s_var])
+
+  toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v)) = do
+    z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
+    applySetRelation lhs [z3_v]
+
+  toZ3 (_ :=: SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
 
   toZ3 (lhs :=: SE_Union x y) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
@@ -257,9 +294,8 @@ instance ToZ3 SetConstraint where
 
 constraintsToZ3 :: SetConstraints -> Z3Converter ()
 constraintsToZ3 cs = do
-  asts <- mapM undefined cs
+  asts <- mapM toZ3 cs
   mapM_ assert asts
-
 
 nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
 nodeIdToLoc transUnit nodeId =
@@ -288,9 +324,11 @@ main = do
       let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
           parsed'' = first (fmap snd) parsed'
           constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
-          nodeInfo = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
+          nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
-      putStrLn $ ppr constraints
-      putStrLn (nodeIdLocInfo nodeInfo)
-      print parsed'
+      evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
+
+      -- putStrLn $ ppr constraints
+      -- putStrLn (nodeIdLocInfo nodeLocs)
+      -- print parsed'
 
