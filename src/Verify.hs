@@ -224,6 +224,19 @@ instance ToZ3 SetConstraint where
     mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
       =<< join (mkEq <$> applySetRelation lhs vs <*> pure the_or)
 
+  toZ3 (lhs :=: SE_UnionSingle x v0 s0) = do
+    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+    let vs = [v_var, s_var]
+
+    mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
+      =<< (z3M mkOr [join $mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
+                         ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
+                                    ,join (mkEq s_var <$> toZ3 s0)
+                                    ]
+                         ])
+
+
   toZ3 (lhs :=: SE_IfThenElse (sensX, sensY) t f) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
@@ -238,12 +251,8 @@ instance ToZ3 SetConstraint where
     z3_f <- applySetRelation f vs
 
     mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-      =<< (mkIte eql z3_t z3_f)
+      =<< join (mkIte eql <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
 
-  --   join $ mkEq <$> toZ3 lhs <*> pure the_or
-
--- constraintToZ3 :: SetConstraint -> Z3 AST
--- constraintToZ3 (S_Entry x :=: S_Exit y) = do
 
 
 constraintsToZ3 :: SetConstraints -> Z3Converter ()
