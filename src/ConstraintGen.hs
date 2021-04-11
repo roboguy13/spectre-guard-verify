@@ -30,12 +30,12 @@ isNoSpecAttr _ = False
 handleDeclarator :: CDeclarator NodeId -> ConstraintGen ()
 handleDeclarator (CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs =
-      tell [C_Exit n :=: SE_Union (c_entry n)
-                                  (single hash (SensAtom Secret))]
+      tell [c_exit n :=: SE_UnionSingle (c_entry n)
+                                  hash (SensAtom Secret)]
 
   | otherwise =
-      tell [C_Exit n :=: SE_Union (c_entry n)
-                                  (single hash (SensAtom Public))]
+      tell [c_exit n :=: SE_UnionSingle (c_entry n)
+                                  hash (SensAtom Public)]
 
 handleDeclarator _ = pure ()
 
@@ -52,20 +52,21 @@ handleExpr :: CExpression NodeId -> ConstraintGen ()
 handleExpr (CAssign CAssignOp (CVar (Ident _ x _) _) e n) =
   let m = annotation e
   in
-  tell [ c_exit n :=: (c_entry n `SE_Union` single x (Sens_T n m)) ]
+  tell [ c_exit n :=: (SE_UnionSingle (c_entry n) x (Sens_T n m)) ]
     *> handleExpr e
 
 handleExpr expr =
   case expr of
-    CVar (Ident _ v _) _ -> tell [ Atom_E exprNodeId :=: singleVar v ]
-    _ ->
-      case nodeIds of
-        [] -> pure ()
-        (x:xs) ->
-          tell [
-              Atom_E exprNodeId :=: foldr SE_Union x xs
-            ]
+    CVar (Ident _ v _) _ -> tell [ atom_e exprNodeId :=: singleVar v ]
+    _ -> go nodeIds
   where
+    go :: [AtomicSet] -> ConstraintGen ()
+    go [] = pure ()
+    go [x] = pure () --tell [ atom_e exprNodeId :=: x ]
+    go (x:y:rest) = do
+      tell [atom_e exprNodeId :=: SE_Union x y]
+      go (y:rest)
+
     exprNodeId = annotation expr
 
     nodeIds = map (atom_e . annotation) . drop 1 $ universe expr
@@ -78,7 +79,7 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
   where
     go =
       [entryConstraint t
-      ,C_Exit l :=: SE_IfThenElse (Sens_T l p, SensAtom Secret)
+      ,c_exit l :=: SE_IfThenElse (Sens_T l p, SensAtom Secret)
                       (maybeUnion (atom_s l m) (atom_s l))
                       (maybeUnion (c_exit m) c_exit)
       ] ++
@@ -86,11 +87,11 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
           Nothing -> []
           Just f -> [entryConstraint f]
 
-    entryConstraint x = C_Entry (annotation x) :=: SE_Atom (C_Entry l)
+    entryConstraint x = c_entry (annotation x) :=: SE_Atom (C_Entry l)
 
     maybeUnion x g =
       case f_maybe of
-        Nothing -> x
+        Nothing -> SE_Atom x
         Just f -> SE_Union x (g (annotation f))
 
     p = annotation cond
