@@ -95,6 +95,7 @@ class ExprConstNames a where
   getVars :: a -> Set Int
   getNodeIds :: a -> Set NodeId
   getSPairs :: a -> Set (NodeId, NodeId)
+  getTPairs :: a -> Set (NodeId, NodeId)
 
 instance ExprConstNames SensExpr where
   getVars _ = mempty
@@ -102,6 +103,9 @@ instance ExprConstNames SensExpr where
   getNodeIds (Sens_T x y) = Set.fromList [x, y]
 
   getSPairs _ = mempty
+
+  getTPairs (Sens_T x y) = Set.singleton (x, y)
+  getTPairs _ = mempty
 
 instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
@@ -119,6 +123,12 @@ instance ExprConstNames (SetExpr freeVars) where
   getSPairs (SE_UnionSingle x v s) = getSPairs x <> getSPairs s
   getSPairs (SE_IfThenElse (sA, sB) x y) = getSPairs sA <> getSPairs sB <> getSPairs x <> getSPairs y
 
+  getTPairs (SE_Atom x) = getTPairs x
+  getTPairs (SE_Union x y) = getTPairs x <> getTPairs y
+  getTPairs (SE_UnionSingle x v s) = getTPairs x <> getTPairs s
+  getTPairs (SE_IfThenElse (sA, sB) x y) = getTPairs sA <> getTPairs sB <> getTPairs x <> getTPairs y
+
+
 instance ExprConstNames (AtomicSet freeVars) where
   getVars (SetFamily sf) = getVars sf
   getVars (SingleVar v) = Set.singleton v
@@ -128,6 +138,9 @@ instance ExprConstNames (AtomicSet freeVars) where
 
   getSPairs (SetFamily sf) = getSPairs sf
   getSPairs _ = mempty
+
+  getTPairs (SetFamily sf) = getTPairs sf
+  getTPairs _ = mempty
 
 instance ExprConstNames (SetFamily freeVars) where
   getVars _ = mempty
@@ -139,15 +152,19 @@ instance ExprConstNames (SetFamily freeVars) where
   getSPairs (Atom_S' x y) = Set.singleton (x, y)
   getSPairs _ = mempty
 
+  getTPairs _ = mempty
+
 instance ExprConstNames SetConstraint where
   getVars (x :=: y) = getVars x <> getVars y
   getNodeIds (x :=: y) = getNodeIds x <> getNodeIds y
   getSPairs (x :=: y) = getSPairs x <> getSPairs y
+  getTPairs (x :=: y) = getTPairs x <> getTPairs y
 
 instance ExprConstNames SetConstraints where
   getVars = foldr Set.union mempty . map getVars
   getNodeIds = foldr Set.union mempty . map getNodeIds
   getSPairs = foldr Set.union mempty . map getSPairs
+  getTPairs = foldr Set.union mempty . map getTPairs
 
 pattern C_Exit x = SetFamily (C_Exit' x)
 pattern C_Entry x = SetFamily (C_Entry' x)

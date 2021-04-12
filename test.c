@@ -1,5 +1,5 @@
 int test() {
-  int y __attribute__((nospec));
+  int y;
   int x;
   y = 1;
   if (y == 0) {
