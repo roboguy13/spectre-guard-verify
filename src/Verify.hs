@@ -128,10 +128,11 @@ defineZ3Names vars nodeIds = do
           Node_Sort -> node_sort
        }
 
-evalZ3Converter :: [Int] -> [NodeId] -> Z3Converter a -> IO a
+evalZ3Converter :: [Int] -> [NodeId] -> Z3Converter a -> IO Result
 evalZ3Converter vars nodeIds (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
   runReaderT conv z3Info
+  check
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -408,5 +409,5 @@ main = do
       -- putStrLn (nodeIdLocInfo nodeLocs)
       -- print parsed'
 
-      evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
+      print =<< evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
 
