@@ -64,7 +64,7 @@ handleExpr expr =
     go [] = pure ()
     go [x] = pure () --tell [ atom_e exprNodeId :=: x ]
     go (x:y:rest) = do
-      tell [atom_e exprNodeId :=: SE_Union x y]
+      tell [atom_e exprNodeId :=: SE_Union x (SE_Atom y)]
       go (y:rest)
 
     exprNodeId = annotation expr
@@ -79,9 +79,10 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
   where
     go =
       [entryConstraint t
-      ,c_exit l :=: SE_IfThenElse (Sens_T l p, SensAtom Secret)
-                      (maybeUnion (atom_s l m) (atom_s l))
-                      (maybeUnion (c_exit m) c_exit)
+      ,c_exit l :=: SE_Union (c_entry l)
+                             (SE_IfThenElse (Sens_T l p, SensAtom Secret)
+                               (maybeUnion (atom_s l m) (atom_s l))
+                               (maybeUnion (c_exit m) c_exit))
       ] ++
         case f_maybe of
           Nothing -> []

@@ -16,13 +16,16 @@ import           Data.Data
 
 import           Ppr
 
+import           Data.Set (Set)
+import qualified Data.Set as Set
+
 type family Sublist xs ys where
   Sublist (x:xs) (x:ys) = Sublist xs ys
   Sublist '[] ys = True
   Sublist xs ys = False
 
 newtype NodeId = NodeId { getNodeId :: Integer }
-  deriving (Show, Eq, Data)
+  deriving (Show, Eq, Data, Ord)
 
 newNodeId :: State NodeId NodeId
 newNodeId = do
@@ -50,9 +53,9 @@ instance Ppr SensExpr where
   ppr (Sens_T x y) = "T(" ++ ppr x ++ ", " ++ ppr y ++ ")"
 
 data SetConstraint =
-  forall freeVarsLHS freeVarsRHS.
+  forall freeVars.
       -- freeVarsLHS `Sublist` freeVarsRHS ~ True =>
-        SetFamily freeVarsLHS :=: SetExpr freeVarsRHS
+        SetFamily freeVars :=: SetExpr freeVars
   -- deriving (Show)
 
 instance Ppr SetConstraint where
@@ -60,7 +63,7 @@ instance Ppr SetConstraint where
 
 data SetExpr (freeVars :: [*]) where
   SE_Atom :: AtomicSet freeVars -> SetExpr freeVars
-  SE_Union :: AtomicSet freeVars -> AtomicSet freeVars -> SetExpr freeVars
+  SE_Union :: AtomicSet freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_UnionSingle :: SetExpr freeVars -> Int -> SensExpr -> SetExpr freeVars
   SE_IfThenElse :: (SensExpr, SensExpr) -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
   -- deriving (Show)
@@ -89,46 +92,46 @@ data AtomicSet freeVars where
   -- deriving (Show)
 
 class ExprConstNames a where
-  getVars :: a -> [Int]
-  getNodeIds :: a -> [NodeId]
+  getVars :: a -> Set Int
+  getNodeIds :: a -> Set NodeId
 
 instance ExprConstNames SensExpr where
-  getVars _ = []
-  getNodeIds (SensAtom _) = []
-  getNodeIds (Sens_T x y) = [x, y]
+  getVars _ = mempty
+  getNodeIds (SensAtom _) = mempty
+  getNodeIds (Sens_T x y) = Set.fromList [x, y]
 
 instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
-  getVars (SE_Union x y) = getVars x ++ getVars y
-  getVars (SE_UnionSingle x v s) = getVars x ++ [v] ++ getVars s
-  getVars (SE_IfThenElse (sA, sB) x y) = getVars sA ++ getVars sB ++ getVars x ++ getVars y
+  getVars (SE_Union x y) = getVars x <> getVars y
+  getVars (SE_UnionSingle x v s) = getVars x <> Set.singleton v <> getVars s
+  getVars (SE_IfThenElse (sA, sB) x y) = getVars sA <> getVars sB <> getVars x <> getVars y
 
   getNodeIds (SE_Atom x) = getNodeIds x
-  getNodeIds (SE_Union x y) = getNodeIds x ++ getNodeIds y
-  getNodeIds (SE_UnionSingle x v s) = getNodeIds x ++ getNodeIds s
-  getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA ++ getNodeIds sB ++ getNodeIds x ++ getNodeIds y
+  getNodeIds (SE_Union x y) = getNodeIds x <> getNodeIds y
+  getNodeIds (SE_UnionSingle x v s) = getNodeIds x <> getNodeIds s
+  getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA <> getNodeIds sB <> getNodeIds x <> getNodeIds y
 
 instance ExprConstNames (AtomicSet freeVars) where
   getVars (SetFamily sf) = getVars sf
-  getVars (SingleVar v) = [v]
+  getVars (SingleVar v) = Set.singleton v
 
   getNodeIds (SetFamily sf) = getNodeIds sf
-  getNodeIds (SingleVar _) = []
+  getNodeIds (SingleVar _) = mempty
 
 instance ExprConstNames (SetFamily freeVars) where
-  getVars _ = []
-  getNodeIds (C_Exit' x) = [x]
-  getNodeIds (C_Entry' x) = [x]
-  getNodeIds (Atom_S' x y) = [x, y]
-  getNodeIds (Atom_E' x) = [x]
+  getVars _ = mempty
+  getNodeIds (C_Exit' x) = Set.singleton x
+  getNodeIds (C_Entry' x) = Set.singleton x
+  getNodeIds (Atom_S' x y) = Set.fromList [x, y]
+  getNodeIds (Atom_E' x) = Set.singleton x
 
 instance ExprConstNames SetConstraint where
-  getVars (x :=: y) = getVars x ++ getVars y
-  getNodeIds (x :=: y) = getNodeIds x ++ getNodeIds y
+  getVars (x :=: y) = getVars x <> getVars y
+  getNodeIds (x :=: y) = getNodeIds x <> getNodeIds y
 
 instance ExprConstNames SetConstraints where
-  getVars = concatMap getVars
-  getNodeIds = concatMap getNodeIds
+  getVars = foldr Set.union mempty . map getVars
+  getNodeIds = foldr Set.union mempty . map getNodeIds
 
 pattern C_Exit x = SetFamily (C_Exit' x)
 pattern C_Entry x = SetFamily (C_Entry' x)

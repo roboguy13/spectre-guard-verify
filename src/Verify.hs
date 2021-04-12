@@ -32,6 +32,7 @@ import           Data.Proxy
 import           Data.Kind
 
 import qualified Data.List as L
+import qualified Data.Set as Set
 
 import           Orphans ()
 import           Ppr
@@ -128,11 +129,36 @@ defineZ3Names vars nodeIds = do
           Node_Sort -> node_sort
        }
 
+generateS's :: [Int] -> [NodeId] -> Z3Converter ()
+generateS's _ [] = pure ()
+generateS's vars nodeIds@(firstNodeId:_) = do
+  true <- mkTrue
+
+  forM_ (zip nodeIds nodeIds) $ \(m, n) ->
+    forallQuantifyFreeVars (Atom_S' firstNodeId firstNodeId) $ \vars@[v,s] -> do
+      (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
+
+      secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
+
+      join $ mkIte <$> applySetRelation (C_Exit' n) vars
+        <*> join (mkIte <$> (mkExists [] [s'_sym] [sens_sort]
+                              =<< applySetRelation (C_Exit' m) [v, s'_var]
+                            )
+                        <*> applySetRelation (Atom_S' m n) [v, secret]
+                        <*> applySetRelation (Atom_S' m n) [v, s]
+                 )
+        <*> mkEq true true
+
+
 evalZ3Converter :: [Int] -> [NodeId] -> Z3Converter a -> IO Result
 evalZ3Converter vars nodeIds (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
-  runReaderT conv z3Info
-  check
+
+  case generateS's vars nodeIds of
+    Z3Converter generateS's_Z3 -> do
+      str <- runReaderT (generateS's_Z3 >> conv >> solverToString) z3Info
+      liftIO $ putStrLn str
+      check
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -409,5 +435,5 @@ main = do
       -- putStrLn (nodeIdLocInfo nodeLocs)
       -- print parsed'
 
-      print =<< evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
+      print =<< evalZ3Converter (Set.toList (getVars constraints)) (Set.toList (getNodeIds constraints)) (constraintsToZ3 constraints)
 
