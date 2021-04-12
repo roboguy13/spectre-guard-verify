@@ -60,7 +60,7 @@ handleExpr expr =
     CVar (Ident _ v _) _ -> tell [ atom_e exprNodeId :=: singleVar v ]
     _ -> go nodeIds
   where
-    go :: [AtomicSet] -> ConstraintGen ()
+    go :: [AtomicSet '[Var]] -> ConstraintGen ()
     go [] = pure ()
     go [x] = pure () --tell [ atom_e exprNodeId :=: x ]
     go (x:y:rest) = do

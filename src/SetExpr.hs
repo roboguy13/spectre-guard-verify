@@ -2,6 +2,11 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PolyKinds #-}
 
 module SetExpr where
 
@@ -10,6 +15,11 @@ import           Control.Monad.State
 import           Data.Data
 
 import           Ppr
+
+type family Sublist xs ys where
+  Sublist (x:xs) (x:ys) = Sublist xs ys
+  Sublist '[] ys = True
+  Sublist xs ys = False
 
 newtype NodeId = NodeId { getNodeId :: Integer }
   deriving (Show, Eq, Data)
@@ -40,20 +50,22 @@ instance Ppr SensExpr where
   ppr (Sens_T x y) = "T(" ++ ppr x ++ ", " ++ ppr y ++ ")"
 
 data SetConstraint =
-  SetFamily :=: SetExpr
-  deriving (Show)
+  forall freeVarsLHS freeVarsRHS.
+      -- freeVarsLHS `Sublist` freeVarsRHS ~ True =>
+        SetFamily freeVarsLHS :=: SetExpr freeVarsRHS
+  -- deriving (Show)
 
 instance Ppr SetConstraint where
   ppr (x :=: y) = ppr x ++ " = " ++ ppr y
 
-data SetExpr
-  = SE_Atom AtomicSet
-  | SE_Union AtomicSet AtomicSet
-  | SE_UnionSingle SetExpr Int SensExpr
-  | SE_IfThenElse (SensExpr, SensExpr) SetExpr SetExpr
-  deriving (Show)
+data SetExpr (freeVars :: [*]) where
+  SE_Atom :: AtomicSet freeVars -> SetExpr freeVars
+  SE_Union :: AtomicSet freeVars -> AtomicSet freeVars -> SetExpr freeVars
+  SE_UnionSingle :: SetExpr freeVars -> Int -> SensExpr -> SetExpr freeVars
+  SE_IfThenElse :: (SensExpr, SensExpr) -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
+  -- deriving (Show)
 
-instance Ppr SetExpr where
+instance Ppr (SetExpr freeVars) where
   ppr (SE_Atom x) = ppr x
   ppr (SE_Union x y) = ppr x ++ " U " ++ ppr y
   ppr (SE_UnionSingle x v s) = ppr x ++ " U {(" ++ show v ++ ", " ++ ppr s ++ ")}"
@@ -61,19 +73,20 @@ instance Ppr SetExpr where
 
 type SetConstraints = [SetConstraint]
 
-data SetFamily =
-    C_Exit' NodeId
-  | C_Entry' NodeId
-  | Atom_S' NodeId NodeId
-  | Atom_E' NodeId
-  deriving (Show)
+type Var = Int
+
+data SetFamily freeVars where
+  C_Exit' :: NodeId -> SetFamily '[Var, SensExpr]
+  C_Entry' :: NodeId -> SetFamily '[Var, SensExpr]
+  Atom_S' :: NodeId -> NodeId -> SetFamily '[Var, SensExpr]
+  Atom_E' :: NodeId -> SetFamily '[Var]
+  -- deriving (Show)
 
 
-data AtomicSet
-  = SetFamily SetFamily
-  -- | Single Int SensExpr
-  | SingleVar Int
-  deriving (Show)
+data AtomicSet freeVars where
+  SetFamily :: SetFamily freeVars -> AtomicSet freeVars
+  SingleVar :: Int -> AtomicSet '[Var]
+  -- deriving (Show)
 
 class ExprConstNames a where
   getVars :: a -> [Int]
@@ -84,7 +97,7 @@ instance ExprConstNames SensExpr where
   getNodeIds (SensAtom _) = []
   getNodeIds (Sens_T x y) = [x, y]
 
-instance ExprConstNames SetExpr where
+instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
   getVars (SE_Union x y) = getVars x ++ getVars y
   getVars (SE_UnionSingle x v s) = getVars x ++ [v] ++ getVars s
@@ -95,14 +108,14 @@ instance ExprConstNames SetExpr where
   getNodeIds (SE_UnionSingle x v s) = getNodeIds x ++ getNodeIds s
   getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA ++ getNodeIds sB ++ getNodeIds x ++ getNodeIds y
 
-instance ExprConstNames AtomicSet where
+instance ExprConstNames (AtomicSet freeVars) where
   getVars (SetFamily sf) = getVars sf
   getVars (SingleVar v) = [v]
 
   getNodeIds (SetFamily sf) = getNodeIds sf
   getNodeIds (SingleVar _) = []
 
-instance ExprConstNames SetFamily where
+instance ExprConstNames (SetFamily freeVars) where
   getVars _ = []
   getNodeIds (C_Exit' x) = [x]
   getNodeIds (C_Entry' x) = [x]
@@ -122,12 +135,12 @@ pattern C_Entry x = SetFamily (C_Entry' x)
 pattern Atom_S x y = SetFamily (Atom_S' x y)
 pattern Atom_E x = SetFamily (Atom_E' x)
 
-instance Ppr AtomicSet where
+instance Ppr (AtomicSet freeVars) where
   ppr (SetFamily x) = ppr x
   -- ppr (Single x y) = "{(" ++ show x ++ ", " ++ ppr y ++ ")}"
   ppr (SingleVar v) = show v
 
-instance Ppr SetFamily where
+instance Ppr (SetFamily freeVars) where
   ppr (C_Exit' n) = "C_exit(" ++ ppr n ++ ")"
   ppr (C_Entry' n) = "C_entry(" ++ ppr n ++ ")"
   ppr (Atom_S' x y) = "S(" ++ ppr x ++ ", " ++ ppr y ++ ")"
@@ -136,16 +149,16 @@ instance Ppr SetFamily where
 instance Ppr SetConstraints where
   ppr = unlines . map ppr
 
-class SetFamilyExpr a where
-  c_exit :: NodeId -> a
-  c_entry :: NodeId -> a
-  atom_s :: NodeId -> NodeId -> a
-  atom_e :: NodeId -> a
+class SetFamilyExpr f where
+  c_exit :: NodeId -> f '[Var, SensExpr]
+  c_entry :: NodeId -> f '[Var, SensExpr]
+  atom_s :: NodeId -> NodeId -> f '[Var, SensExpr]
+  atom_e :: NodeId -> f '[Var]
 
 
-class SetFamilyExpr a => SetExprAtom a where
+class SetFamilyExpr f => SetExprAtom f where
   -- single :: Int -> SensExpr -> a
-  singleVar :: Int -> a
+  singleVar :: Int -> f '[Var]
 
 instance SetFamilyExpr SetFamily where
   c_exit = C_Exit'

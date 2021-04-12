@@ -11,6 +11,8 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
@@ -26,6 +28,10 @@ import           Data.Generics.Uniplate.Data
 import           Data.Bifunctor
 
 import           Data.Typeable
+import           Data.Proxy
+import           Data.Kind
+
+import qualified Data.List as L
 
 import           Orphans ()
 import           Ppr
@@ -36,7 +42,7 @@ data Z3Sort = Sens_Sort | Var_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
   Z3Info
-  { z3Info_setFamilyDecls :: SetFamily -> FuncDecl
+  { z3Info_setFamilyDecls :: forall (a :: [Type]). SetFamily a -> FuncDecl
   , z3Info_sensExprDecls :: SensExpr -> FuncDecl
   , z3Info_varDecls :: Int -> FuncDecl
   , z3Info_nodeDecls :: NodeId -> FuncDecl
@@ -91,8 +97,9 @@ defineZ3Names vars nodeIds = do
 
     c_exit_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_exit_syms
     c_entry_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_entry_syms
-    s_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort, node_sort] s_syms
-    t_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort, node_sort] t_syms
+    s_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort] s_syms
+
+    t_fns <- zip nodeIds <$> buildFn [node_sort, node_sort] t_syms
 
     e_fns <- zip nodeIds <$> buildFn [var_sort] e_syms
 
@@ -129,8 +136,10 @@ evalZ3Converter vars nodeIds (Z3Converter conv) = evalZ3 $ do
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
 
-instance Z3FuncDecl SetFamily where
-  lookupZ3FuncDecl = lookupZ3' z3Info_setFamilyDecls
+instance forall (t :: [Type]). Z3FuncDecl (SetFamily t) where
+  lookupZ3FuncDecl x = do
+    z3Info <- ask
+    return $ z3Info_setFamilyDecls z3Info x
 
 instance Z3FuncDecl SensExpr where
   lookupZ3FuncDecl = lookupZ3' z3Info_sensExprDecls
@@ -156,27 +165,61 @@ z3M :: MonadZ3 z3 => ([a] -> z3 b) -> [z3 a] -> z3 b
 z3M f argsM =
   f =<< sequence argsM
 
-lookupSetFamilyFn :: SetFamily -> Z3Converter (FuncDecl, [AST])
-lookupSetFamilyFn sf@(C_Exit' n) = do
+lookupSetFamilyFn :: SetFamily a -> Z3Converter (FuncDecl, [AST])
+lookupSetFamilyFn sf@(C_Exit' _n) = do
   f <- lookupZ3FuncDecl sf
-  (f,) <$> sequence [toZ3 n]
+  pure (f, [])
 
-lookupSetFamilyFn sf@(C_Entry' n) = do
+lookupSetFamilyFn sf@(C_Entry' _n) = do
   f <- lookupZ3FuncDecl sf
-  (f,) <$> sequence [toZ3 n]
+  pure (f, [])
 
-lookupSetFamilyFn sf@(Atom_S' x y) = do
+lookupSetFamilyFn sf@(Atom_S' _x y) = do
   f <- lookupZ3FuncDecl sf
-  (f,) <$> sequence [toZ3 x, toZ3 y]
+  (f,) <$> sequence [toZ3 y]
 
-lookupSetFamilyFn sf@(Atom_E' x) = do
+lookupSetFamilyFn sf@(Atom_E' _x) = do
   f <- lookupZ3FuncDecl sf
-  (f,) <$> sequence [toZ3 x]
+  pure (f, [])
 
-applyFamilyFnM :: SetFamily -> [Z3Converter AST] -> Z3Converter AST
+applyFamilyFnM :: SetFamily a -> [Z3Converter AST] -> Z3Converter AST
 applyFamilyFnM sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
   mkAppM sf (map pure args ++ restArgs)
+
+class FreeVars (a :: [Type]) where
+  freeVars :: f a -> Z3Converter [(Sort, Symbol, AST)]
+
+-- NOTE: We do not worry about name collisions since there should be no
+-- nested foralls currently. If there is a nested forall, this will need to
+-- be revisited (with freshness of names ensured explicitly)
+instance FreeVars '[] where
+  freeVars _ = pure []
+
+instance FreeVars xs => FreeVars (Var : xs) where
+  freeVars _ = (:) <$> mkSymVar "v" Var_Sort <*> freeVars (Proxy @xs)
+
+instance FreeVars xs => FreeVars (SensExpr : xs) where
+  freeVars _ = (:) <$> mkSymVar "s" Sens_Sort <*> freeVars (Proxy @xs)
+
+class FreeVarsE f where
+  freeVarsE :: f a -> Z3Converter [(Sort, Symbol, AST)]
+
+instance FreeVarsE SetFamily where
+  freeVarsE e@(C_Exit' {}) = freeVars e
+  freeVarsE e@(C_Entry' {}) = freeVars e
+  freeVarsE e@(Atom_S' {}) = freeVars e
+  freeVarsE e@(Atom_E' {}) = freeVars e
+
+instance FreeVarsE AtomicSet where
+  freeVarsE (SetFamily x) = freeVarsE x
+  freeVarsE e@(SingleVar {}) = freeVarsE e
+
+instance FreeVarsE SetExpr where
+  freeVarsE (SE_Atom x) = freeVarsE x
+  freeVarsE (SE_Union x y) = L.union <$> freeVarsE x <*> freeVarsE y
+  freeVarsE (SE_UnionSingle x _ _) = freeVarsE x
+  freeVarsE (SE_IfThenElse _ x y) = L.union <$> freeVarsE x <*> freeVarsE y
 
 class Z3SetRelation a where
   applySetRelation :: a -> [AST] -> Z3Converter AST
@@ -184,15 +227,15 @@ class Z3SetRelation a where
   applySetRelationM :: a -> [Z3Converter AST] -> Z3Converter AST
   applySetRelationM sr xs = applySetRelation sr =<< sequence xs
 
-instance Z3SetRelation SetFamily where
+instance Z3SetRelation (SetFamily a) where
   applySetRelation sr = applyFamilyFnM sr . map pure
   applySetRelationM = applyFamilyFnM
 
-instance Z3SetRelation AtomicSet where
+instance Z3SetRelation (AtomicSet a) where
   applySetRelation (SetFamily sr) args = applySetRelation sr args
   applySetRelation (SingleVar i) _ = toZ3 i
 
-instance Z3SetRelation SetExpr where
+instance Z3SetRelation (SetExpr a) where
   applySetRelation (SE_Atom sr) args = applySetRelation sr args
 
   applySetRelation (SE_Union x y) args = do
@@ -209,6 +252,16 @@ instance Z3SetRelation SetExpr where
 
     join $ mkIte eql <$> applySetRelation t args <*> applySetRelation f args
 
+
+forallQuantifyFreeVars :: forall f a. (FreeVarsE f) => f a -> ([AST] -> Z3Converter AST) -> Z3Converter AST
+forallQuantifyFreeVars e k = do
+  fvs <- freeVarsE e
+
+  let sorts = map (\(x, _, _) -> x) fvs
+      syms = map (\(_, x, _) -> x) fvs
+      vars = map (\(_, _, x) -> x) fvs
+
+  mkForall [] syms sorts =<< k vars
 
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
@@ -237,37 +290,62 @@ instance ToZ3 SensExpr where
 
 
 instance ToZ3 SetConstraint where
-  toZ3 (lhs :=: SE_Atom (SetFamily x)) = do
-
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-
-    mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-      =<< join (mkEq <$> applyFamilyFnM lhs [pure v_var, pure s_var] <*> applyFamilyFnM x [pure v_var, pure s_var])
-
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v)) = do
     z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
     applySetRelation lhs [z3_v]
 
+  toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SetFamily x)) =
+    forallQuantifyFreeVars lhs $ \vars ->
+      join (mkEq <$> applySetRelation lhs vars <*> applySetRelation x vars)
+
+  toZ3 (lhs@(Atom_E' _) :=: SE_UnionSingle {}) = error "Assignment of E to a singleton of a variable/sensitivity pair"
+
+  toZ3 (lhs@(Atom_E' _) :=: SE_Union x y) =
+    forallQuantifyFreeVars lhs $ \vars -> do
+      the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
+      join (mkEq <$> applySetRelation lhs vars <*> pure the_or)
+
+
+
+  toZ3 (lhs :=: SE_Atom (SetFamily x)) =
+    forallQuantifyFreeVars lhs $ \vars ->
+      join (mkEq <$> applySetRelation lhs vars <*> applySetRelation x vars)
+
+    -- (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+    -- (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+
+    -- mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
+    --   =<< join (mkEq <$> applyFamilyFnM lhs [pure v_var, pure s_var] <*> applyFamilyFnM x [pure v_var, pure s_var])
+
   toZ3 (_ :=: SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
 
-  toZ3 (lhs :=: SE_Union x y) = do
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-    let vs = [v_var, s_var]
+  toZ3 (lhs :=: SE_Union x y) =
+    forallQuantifyFreeVars lhs $ \vars -> do
+      the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
+      join (mkEq <$> applySetRelation lhs vars <*> pure the_or)
+    -- (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+    -- (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+    -- let vs = [v_var, s_var]
 
-    the_or <- z3M mkOr [applySetRelation x vs, applySetRelation y vs]
+    -- the_or <- z3M mkOr [applySetRelation x vs, applySetRelation y vs]
 
-    mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-      =<< join (mkEq <$> applySetRelation lhs vs <*> pure the_or)
+    -- mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
+    --   =<< join (mkEq <$> applySetRelation lhs vs <*> pure the_or)
 
   toZ3 (lhs :=: SE_UnionSingle x v0 s0) = do
+    -- forallQuantifyFreeVars lhs $ \vars -> do
+    --   z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
+    --                      ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
+    --                                 ,join (mkEq s_var <$> toZ3 s0)
+    --                                 ]
+    --                      ]
+
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
     let vs = [v_var, s_var]
 
     mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-      =<< (z3M mkOr [join $mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
+      =<< (z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
                          ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
                                     ,join (mkEq s_var <$> toZ3 s0)
                                     ]
@@ -326,9 +404,9 @@ main = do
           constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
           nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
-      evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
-
-      -- putStrLn $ ppr constraints
+      putStrLn $ ppr constraints
       -- putStrLn (nodeIdLocInfo nodeLocs)
       -- print parsed'
+
+      evalZ3Converter (getVars constraints) (getNodeIds constraints) (constraintsToZ3 constraints)
 
