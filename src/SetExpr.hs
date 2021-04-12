@@ -94,11 +94,14 @@ data AtomicSet freeVars where
 class ExprConstNames a where
   getVars :: a -> Set Int
   getNodeIds :: a -> Set NodeId
+  getSPairs :: a -> Set (NodeId, NodeId)
 
 instance ExprConstNames SensExpr where
   getVars _ = mempty
   getNodeIds (SensAtom _) = mempty
   getNodeIds (Sens_T x y) = Set.fromList [x, y]
+
+  getSPairs _ = mempty
 
 instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
@@ -111,12 +114,20 @@ instance ExprConstNames (SetExpr freeVars) where
   getNodeIds (SE_UnionSingle x v s) = getNodeIds x <> getNodeIds s
   getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA <> getNodeIds sB <> getNodeIds x <> getNodeIds y
 
+  getSPairs (SE_Atom x) = getSPairs x
+  getSPairs (SE_Union x y) = getSPairs x <> getSPairs y
+  getSPairs (SE_UnionSingle x v s) = getSPairs x <> getSPairs s
+  getSPairs (SE_IfThenElse (sA, sB) x y) = getSPairs sA <> getSPairs sB <> getSPairs x <> getSPairs y
+
 instance ExprConstNames (AtomicSet freeVars) where
   getVars (SetFamily sf) = getVars sf
   getVars (SingleVar v) = Set.singleton v
 
   getNodeIds (SetFamily sf) = getNodeIds sf
   getNodeIds (SingleVar _) = mempty
+
+  getSPairs (SetFamily sf) = getSPairs sf
+  getSPairs _ = mempty
 
 instance ExprConstNames (SetFamily freeVars) where
   getVars _ = mempty
@@ -125,13 +136,18 @@ instance ExprConstNames (SetFamily freeVars) where
   getNodeIds (Atom_S' x y) = Set.fromList [x, y]
   getNodeIds (Atom_E' x) = Set.singleton x
 
+  getSPairs (Atom_S' x y) = Set.singleton (x, y)
+  getSPairs _ = mempty
+
 instance ExprConstNames SetConstraint where
   getVars (x :=: y) = getVars x <> getVars y
   getNodeIds (x :=: y) = getNodeIds x <> getNodeIds y
+  getSPairs (x :=: y) = getSPairs x <> getSPairs y
 
 instance ExprConstNames SetConstraints where
   getVars = foldr Set.union mempty . map getVars
   getNodeIds = foldr Set.union mempty . map getNodeIds
+  getSPairs = foldr Set.union mempty . map getSPairs
 
 pattern C_Exit x = SetFamily (C_Exit' x)
 pattern C_Entry x = SetFamily (C_Entry' x)

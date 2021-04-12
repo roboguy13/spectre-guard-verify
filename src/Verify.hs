@@ -23,6 +23,7 @@ import           Z3.Monad
 
 import           Control.Monad.State
 import           Control.Monad.Reader
+import           Control.Monad.Writer
 
 import           Data.Generics.Uniplate.Data
 import           Data.Bifunctor
@@ -129,13 +130,13 @@ defineZ3Names vars nodeIds = do
           Node_Sort -> node_sort
        }
 
-generateS's :: [Int] -> [NodeId] -> Z3Converter ()
-generateS's _ [] = pure ()
-generateS's vars nodeIds@(firstNodeId:_) = do
+generateS's :: [(NodeId, NodeId)] -> Z3Converter ()
+generateS's [] = pure ()
+generateS's sPairs@((firstPairA, firstPairB):_) = do
   true <- mkTrue
 
-  forM_ (zip nodeIds nodeIds) $ \(m, n) ->
-    forallQuantifyFreeVars (Atom_S' firstNodeId firstNodeId) $ \vars@[v,s] -> do
+  forM_ sPairs $ \(m, n) ->
+    assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
       (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
 
       secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
@@ -147,14 +148,13 @@ generateS's vars nodeIds@(firstNodeId:_) = do
                         <*> applySetRelation (Atom_S' m n) [v, secret]
                         <*> applySetRelation (Atom_S' m n) [v, s]
                  )
-        <*> mkEq true true
+        <*> mkEq true true)
 
-
-evalZ3Converter :: [Int] -> [NodeId] -> Z3Converter a -> IO Result
-evalZ3Converter vars nodeIds (Z3Converter conv) = evalZ3 $ do
+evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> Z3Converter a -> IO Result
+evalZ3Converter vars nodeIds sPairs (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
 
-  case generateS's vars nodeIds of
+  case generateS's sPairs of
     Z3Converter generateS's_Z3 -> do
       str <- runReaderT (generateS's_Z3 >> conv >> solverToString) z3Info
       liftIO $ putStrLn str
@@ -417,6 +417,7 @@ nodeIdLocInfo = unlines . map go
 getAnns :: CTranslationUnit a -> [a]
 getAnns = foldMap (:[])
 
+
 main :: IO ()
 main = do
   let fileName = "../test.c"
@@ -435,5 +436,8 @@ main = do
       -- putStrLn (nodeIdLocInfo nodeLocs)
       -- print parsed'
 
-      print =<< evalZ3Converter (Set.toList (getVars constraints)) (Set.toList (getNodeIds constraints)) (constraintsToZ3 constraints)
+      print =<< evalZ3Converter (Set.toList (getVars constraints))
+                                (Set.toList (getNodeIds constraints))
+                                (Set.toList (getSPairs constraints))
+                                (constraintsToZ3 constraints)
 
