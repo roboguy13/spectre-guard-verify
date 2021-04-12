@@ -93,15 +93,15 @@ defineZ3Names vars nodeIds = do
 
     bool_sort <- mkBoolSort
 
-    let buildFn sorts = mapM (\n -> mkFuncDecl n sorts bool_sort)
+    let buildFn sorts resultSort = mapM (\n -> mkFuncDecl n sorts resultSort)
 
-    c_exit_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_exit_syms
-    c_entry_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] c_entry_syms
-    s_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort, node_sort] s_syms
+    c_exit_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] bool_sort c_exit_syms
+    c_entry_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] bool_sort c_entry_syms
+    s_fns <- zip nodeIds <$> buildFn [node_sort, var_sort, sens_sort] bool_sort s_syms
 
-    t_fns <- zip nodeIds <$> buildFn [node_sort, node_sort] t_syms
+    t_fns <- zip nodeIds <$> buildFn [node_sort, node_sort] sens_sort t_syms
 
-    e_fns <- zip nodeIds <$> buildFn [var_sort] e_syms
+    e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
 
     let lookup' x xs =
           case lookup x xs of
