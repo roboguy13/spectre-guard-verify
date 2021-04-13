@@ -146,15 +146,22 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
       (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
 
       secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
+      public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
 
       join $ mkIte <$> applySetRelation (C_Exit' n) vars
-        <*> join (mkIte <$> (mkExistsConst [] [s'_sym]
-                              =<< applySetRelation (C_Exit' m) [v, s'_var]
-                            )
-                        <*> applySetRelation (Atom_S' m n) [v, secret]
-                        <*> applySetRelation (Atom_S' m n) [v, s]
-                 )
-        <*> mkEq true true)
+                   <*> join (mkIte <$> (z3M mkOr [applySetRelation (C_Exit' m) [v, secret], applySetRelation (C_Exit' m) [v, public]])
+                                   <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <*> mkTrue)
+                                   <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <*> mkTrue))
+                   <*> join (mkEq <$> mkTrue <*> mkTrue))
+
+      -- join $ mkIte <$> applySetRelation (C_Exit' n) vars
+      --   <*> join (mkIte <$> (mkExistsConst [] [s'_sym]
+      --                         =<< applySetRelation (C_Exit' m) [v, s'_var]
+      --                       )
+      --                   <*> applySetRelation (Atom_S' m n) [v, secret]
+      --                   <*> applySetRelation (Atom_S' m n) [v, s]
+      --            )
+      --   <*> mkEq true true)
 
 generateT's :: [(NodeId, NodeId)] -> Z3Converter ()
 generateT's tPairs = do
