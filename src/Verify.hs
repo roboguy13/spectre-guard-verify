@@ -404,7 +404,8 @@ instance ToZ3 SetConstraint where
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v)) = do
     z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
-    applySetRelation lhs [z3_v]
+
+    join $ mkEq <$> applySetRelation lhs [z3_v] <*> mkTrue
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SetFamily x)) =
     forallQuantifyFreeVars lhs $ \vars ->
@@ -457,11 +458,15 @@ instance ToZ3 SetConstraint where
     let vs = [v_var, s_var]
 
     mkForallConst [] [v_sym, s_sym]
-      =<< (z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
-                         ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
-                                    ,join (mkEq s_var <$> toZ3 s0)
-                                    ]
-                         ])
+      =<< join (mkIte <$> z3M mkAnd [join (mkEq v_var <$> toZ3 v0), join (mkEq s_var <$> toZ3 s0)]
+                      <*> join (mkEq <$> applySetRelation lhs vs <*> mkTrue)
+                      <*> join (mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs))
+      -- =<< (z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
+      --                    ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
+      --                               ,join (mkEq s_var <$> toZ3 s0)
+      --                               ,applySetRelation lhs vs
+      --                               ]
+      --                    ])
 
 
   toZ3 (lhs :=: SE_IfThenElse (sensX, sensY) t f) = do
