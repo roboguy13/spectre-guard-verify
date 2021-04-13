@@ -93,6 +93,9 @@ handleExpr expr =
     -- nodeIds = map (atom_e . annotation) . drop 1 $ universe expr
 
 handleStmt :: CStatement NodeId -> ConstraintGen ()
+handleStmt e0@(CExpr (Just e) _) = do
+  e0 `connect` e
+  handleExpr e
 handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *>
     case f_maybe of
       Nothing -> pure ()
@@ -120,14 +123,15 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
     m = annotation t
 
 handleStmt e@(CCompound _ items _) = do
-  void $ traverse (constAction handleCompoundItem) items
   nop e
 
   case items of
     [] -> pure ()
-    (firstItem:_) -> tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
+    (firstItem:_) -> --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
+      e `connect` firstItem
 
   go items
+  mapM_ handleCompoundItem items
   where
     go [] = pure ()
     go [_] = pure ()
@@ -137,8 +141,12 @@ handleStmt e@(CCompound _ items _) = do
         ]
       go (y:rest)
 
-handleStmt e = --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
-  nop e
+handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
+  case children e of
+    [] -> nop e
+    cs@(c:_) -> do
+      e `connect` c
+      mapM_ handleStmt cs
 
 -- | Generate C_Exit(n) = C_Entry(n) constraint for given node
 nop :: Annotated f => f NodeId -> ConstraintGen ()

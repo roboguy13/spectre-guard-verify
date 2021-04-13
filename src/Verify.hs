@@ -520,18 +520,19 @@ main = do
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
           putStrLn $ ppr constraints
+          print parsed'
           -- putStrLn (nodeIdLocInfo nodeLocs)
           -- print parsed'
 
-          (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-                                                 (Set.toList (getNodeIds constraints))
-                                                 (Set.toList (getSPairs constraints))
-                                                 (Set.toList (getTPairs constraints))
-                                                 (constraintsToZ3 constraints)
-          print r
+          -- (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
+          --                                        (Set.toList (getNodeIds constraints))
+          --                                        (Set.toList (getSPairs constraints))
+          --                                        (Set.toList (getTPairs constraints))
+          --                                        (constraintsToZ3 constraints)
+          -- print r
 
-          case modelStr_maybe of
-            Nothing -> putStrLn "No model generated"
-            Just modelStr -> do
-              putStrLn $ "Model:\n" <> modelStr
+          -- case modelStr_maybe of
+          --   Nothing -> putStrLn "No model generated"
+          --   Just modelStr -> do
+          --     putStrLn $ "Model:\n" <> modelStr
 
