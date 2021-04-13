@@ -8,6 +8,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE PolyKinds #-}
 
+{-# OPTIONS_GHC -Wincomplete-patterns #-}
+
 module SetExpr where
 
 import           Control.Monad.State
@@ -66,6 +68,7 @@ data SetExpr (freeVars :: [*]) where
   SE_Union :: AtomicSet freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_UnionSingle :: SetExpr freeVars -> Int -> SensExpr -> SetExpr freeVars
   SE_IfThenElse :: (SensExpr, SensExpr) -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
+  SE_Empty :: SetExpr freeVars
   -- deriving (Show)
 
 instance Ppr (SetExpr freeVars) where
@@ -73,6 +76,7 @@ instance Ppr (SetExpr freeVars) where
   ppr (SE_Union x y) = ppr x ++ " U " ++ ppr y
   ppr (SE_UnionSingle x v s) = ppr x ++ " U {(" ++ show v ++ ", " ++ ppr s ++ ")}"
   ppr (SE_IfThenElse (x,y) t f) = "if (" ++ ppr x ++ " = " ++ ppr y ++ ") then " ++ ppr t ++ " else " ++ ppr f
+  ppr SE_Empty = "{}"
 
 type SetConstraints = [SetConstraint]
 
@@ -112,21 +116,25 @@ instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Union x y) = getVars x <> getVars y
   getVars (SE_UnionSingle x v s) = getVars x <> Set.singleton v <> getVars s
   getVars (SE_IfThenElse (sA, sB) x y) = getVars sA <> getVars sB <> getVars x <> getVars y
+  getVars SE_Empty = mempty
 
   getNodeIds (SE_Atom x) = getNodeIds x
   getNodeIds (SE_Union x y) = getNodeIds x <> getNodeIds y
   getNodeIds (SE_UnionSingle x v s) = getNodeIds x <> getNodeIds s
   getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA <> getNodeIds sB <> getNodeIds x <> getNodeIds y
+  getNodeIds SE_Empty = mempty
 
   getSPairs (SE_Atom x) = getSPairs x
   getSPairs (SE_Union x y) = getSPairs x <> getSPairs y
   getSPairs (SE_UnionSingle x v s) = getSPairs x <> getSPairs s
   getSPairs (SE_IfThenElse (sA, sB) x y) = getSPairs sA <> getSPairs sB <> getSPairs x <> getSPairs y
+  getSPairs SE_Empty = mempty
 
   getTPairs (SE_Atom x) = getTPairs x
   getTPairs (SE_Union x y) = getTPairs x <> getTPairs y
   getTPairs (SE_UnionSingle x v s) = getTPairs x <> getTPairs s
   getTPairs (SE_IfThenElse (sA, sB) x y) = getTPairs sA <> getTPairs sB <> getTPairs x <> getTPairs y
+  getTPairs SE_Empty = mempty
 
 
 instance ExprConstNames (AtomicSet freeVars) where

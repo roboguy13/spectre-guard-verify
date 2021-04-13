@@ -1,5 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+{-# OPTIONS_GHC -Wincomplete-patterns #-}
+
 module ConstraintGen where
 
 import           Language.C
@@ -28,16 +30,18 @@ isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
 isNoSpecAttr _ = False
 
 handleDeclarator :: CDeclarator NodeId -> ConstraintGen ()
-handleDeclarator (CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
-  | any isNoSpecAttr attrs =
+handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
+  | any isNoSpecAttr attrs = do
+      nop e
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Secret)]
 
-  | otherwise =
+  | otherwise = do
+      nop e
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Public)]
 
-handleDeclarator _ = pure ()
+handleDeclarator e = nop e
 
 handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
 handleCompoundItem (CBlockDecl e@(CDecl _ xs _)) = nop e *> mapM_ go xs
@@ -101,6 +105,11 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
 handleStmt e@(CCompound _ items _) = do
   void $ traverse (constAction handleCompoundItem) items
   nop e
+
+  case items of
+    [] -> pure ()
+    (firstItem:_) -> tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
+
   go items
   where
     go [] = pure ()
@@ -121,9 +130,15 @@ nop e =
     [ c_exit (annotation e) :=: c_entry (annotation e) ]
 
 
--- TODO: Generate an "initial constraint" on function definition nodes
+-- TODO: Connect to following nodes
 handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
-handleFunDef (CFunDef _ _ _ stmt _) = void $ (constAction handleStmt) stmt
+handleFunDef e@(CFunDef _ _ _ stmt _) = do
+  nop e
+  tell
+    [ c_entry (annotation e) :=: SE_Empty
+    , c_entry (annotation stmt) :=: c_exit (annotation e)
+    ]
+  void $ (constAction handleStmt) stmt
 
 handleExtDecl :: CExternalDeclaration NodeId -> ConstraintGen ()
 handleExtDecl (CFDefExt funDef) = handleFunDef funDef

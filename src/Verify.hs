@@ -303,6 +303,7 @@ instance FreeVarsE SetExpr where
   freeVarsE (SE_Union x y) = L.union <$> freeVarsE x <*> freeVarsE y
   freeVarsE (SE_UnionSingle x _ _) = freeVarsE x
   freeVarsE (SE_IfThenElse _ x y) = L.union <$> freeVarsE x <*> freeVarsE y
+  freeVarsE SE_Empty = pure []
 
 class Z3SetRelation a where
   applySetRelation :: a -> [AST] -> Z3Converter AST
@@ -334,6 +335,8 @@ instance Z3SetRelation (SetExpr a) where
     eql <- mkEq z3_sensX z3_sensY
 
     join $ mkIte eql <$> applySetRelation t args <*> applySetRelation f args
+
+  applySetRelation SE_Empty _args = error "applySetRelation: SE_Empty"
 
 
 forallQuantifyFreeVars :: forall f a. (FreeVarsE f) => f a -> ([AST] -> Z3Converter AST) -> Z3Converter AST
@@ -382,6 +385,10 @@ instance ToZ3 SensExpr where
 
 
 instance ToZ3 SetConstraint where
+  toZ3 (lhs :=: SE_Empty) = do
+    forallQuantifyFreeVars lhs $ \vars -> do
+      mkNot =<< applySetRelation lhs vars
+
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v)) = do
     z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
     applySetRelation lhs [z3_v]
