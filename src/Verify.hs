@@ -40,6 +40,10 @@ import           Ppr
 import           SetExpr
 import           ConstraintGen
 
+instance MonadZ3 m => MonadZ3 (StateT a m) where
+  getSolver = lift getSolver
+  getContext = lift getContext
+
 data Z3Sort = Sens_Sort | Var_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
@@ -51,8 +55,8 @@ data Z3Info =
   , z3Info_sorts :: Z3Sort -> Sort
   }
 
-newtype Z3Converter a = Z3Converter (ReaderT Z3Info Z3 a)
-  deriving (Functor, Applicative, Monad, MonadReader Z3Info, MonadZ3, MonadIO)
+newtype Z3Converter a = Z3Converter (ReaderT Z3Info (StateT Int Z3) a)
+  deriving (Functor, Applicative, Monad, MonadReader Z3Info, MonadState Int, MonadZ3, MonadIO)
 
 defineZ3Names :: [Int] -> [NodeId] -> Z3 Z3Info
 defineZ3Names vars nodeIds = do
@@ -203,7 +207,7 @@ evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
 
   case (generateS's sPairs, generateT's tPairs, notCorrectnessCondition nodeIds) of
     (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter notCorrectnessCondition) -> do
-      str <- runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> notCorrectnessCondition >> solverToString) z3Info
+      str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> notCorrectnessCondition >> solverToString) z3Info
       liftIO $ putStrLn str
       check
       (r, model) <- getModel
@@ -348,10 +352,19 @@ class ToZ3 a where
 
 mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, Symbol, AST)
 mkSymVar name z3sort = do
+  uniq <- get
+  modify succ
+
   sort <- lookupZ3Sort z3sort
-  sym <- mkStringSymbol name
+  sym <- mkStringSymbol (name ++ "__" ++ show uniq)
+
   var <- mkVar sym sort
   return (sort, sym, var)
+
+-- mkFreshVarWith :: Z3Sort -> Z3Converter (Sort, Symbol, AST)
+-- mkFreshVarWith z3sort = do
+--   sort <- lookupZ3Sort z3sort
+
 
 instance ToZ3 NodeId where
   toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
@@ -488,15 +501,15 @@ main = do
       -- putStrLn (nodeIdLocInfo nodeLocs)
       -- print parsed'
 
-      (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-                                             (Set.toList (getNodeIds constraints))
-                                             (Set.toList (getSPairs constraints))
-                                             (Set.toList (getTPairs constraints))
-                                             (constraintsToZ3 constraints)
-      print r
+      -- (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
+      --                                        (Set.toList (getNodeIds constraints))
+      --                                        (Set.toList (getSPairs constraints))
+      --                                        (Set.toList (getTPairs constraints))
+      --                                        (constraintsToZ3 constraints)
+      -- print r
 
-      case modelStr_maybe of
-        Nothing -> putStrLn "No model generated"
-        Just modelStr -> do
-          putStrLn $ "Model:\n" <> modelStr
+      -- case modelStr_maybe of
+      --   Nothing -> putStrLn "No model generated"
+      --   Just modelStr -> do
+      --     putStrLn $ "Model:\n" <> modelStr
 

@@ -40,12 +40,12 @@ handleDeclarator (CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
 handleDeclarator _ = pure ()
 
 handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
-handleCompoundItem (CBlockDecl (CDecl _ xs _)) = mapM_ go xs
+handleCompoundItem (CBlockDecl e@(CDecl _ xs _)) = nop e *> mapM_ go xs
   where
     go (Just declr, _, _) = handleDeclarator declr
     go _ = pure ()
 handleCompoundItem (CBlockDecl {}) = pure ()
-handleCompoundItem (CBlockStmt stmt) = pure () --handleStmt stmt
+handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
 handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
 handleExpr :: CExpression NodeId -> ConstraintGen ()
@@ -55,14 +55,14 @@ handleExpr (CAssign CAssignOp (CVar (Ident _ x _) _) e n) =
   tell [ c_exit n :=: (SE_UnionSingle (c_entry n) x (Sens_T n m)) ]
     *> handleExpr e
 
-handleExpr expr =
+handleExpr expr = nop expr *>
   case expr of
     CVar (Ident _ v _) _ -> tell [ atom_e exprNodeId :=: singleVar v ]
     _ -> go nodeIds
   where
     go :: [AtomicSet '[Var]] -> ConstraintGen ()
     go [] = pure ()
-    go [x] = pure () --tell [ atom_e exprNodeId :=: x ]
+    go [x] = tell [ atom_e exprNodeId :=: SE_Atom x ]-- pure () --tell [ atom_e exprNodeId :=: x ]
     go (x:y:rest) = do
       tell [atom_e exprNodeId :=: SE_Union x (SE_Atom y)]
       go (y:rest)
@@ -98,20 +98,32 @@ handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *
     p = annotation cond
     m = annotation t
 
-handleStmt (CCompound _ items _) = do
+handleStmt e@(CCompound _ items _) = do
   void $ traverse (constAction handleCompoundItem) items
+  nop e
   go items
   where
     go [] = pure ()
     go [_] = pure ()
     go (x:y:rest) = do
-      tell [ c_entry (annotation y) :=: c_exit (annotation x) ]
+      tell
+        [ c_entry (annotation y) :=: c_exit (annotation x)
+        ]
       go (y:rest)
 
-handleStmt e = pure () --mapM_ handleStmt $ drop 1 $ universe e
+handleStmt e = --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
+  nop e
 
+-- | Generate C_Exit(n) = C_Entry(n) constraint for given node
+nop :: Annotated f => f NodeId -> ConstraintGen ()
+nop e =
+  tell
+    [ c_exit (annotation e) :=: c_entry (annotation e) ]
+
+
+-- TODO: Generate an "initial constraint" on function definition nodes
 handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
-handleFunDef (CFunDef _ _ _ stmt _) = void $ transformM (constAction handleStmt) stmt
+handleFunDef (CFunDef _ _ _ stmt _) = void $ (constAction handleStmt) stmt
 
 handleExtDecl :: CExternalDeclaration NodeId -> ConstraintGen ()
 handleExtDecl (CFDefExt funDef) = handleFunDef funDef
