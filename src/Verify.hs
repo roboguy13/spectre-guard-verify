@@ -211,7 +211,7 @@ notCorrectnessCondition nodeIds = do
     track <- mkFreshBoolVar $ "track" ++ show (getNodeId n)
 
 
-    solverAssertAndTrack track =<< mkNot =<<
+    solverAssertAndTrack track =<< -- mkNot =<<
       mkForallConst [] [v_sym, s_sym, s'_sym]
         =<< join
           (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
@@ -502,7 +502,13 @@ instance ToZ3 SetConstraint where
 constraintsToZ3 :: SetConstraints -> Z3Converter ()
 constraintsToZ3 cs = do
   asts <- mapM toZ3 cs
-  mapM_ assert asts
+
+  let astsZipped = zip asts [0..]
+
+  forM_ astsZipped $ \(ast, n) -> do
+    track <- mkFreshBoolVar $ "ast" ++ show n
+
+    solverAssertAndTrack track ast
 
 nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
 nodeIdToLoc transUnit nodeId =

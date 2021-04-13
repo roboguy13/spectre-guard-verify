@@ -34,12 +34,10 @@ isNoSpecAttr _ = False
 handleDeclarator :: CDeclarator NodeId -> ConstraintGen ()
 handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
-      nop e
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Secret)]
 
   | otherwise = do
-      nop e
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Public)]
 
