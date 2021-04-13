@@ -223,7 +223,7 @@ notCorrectnessCondition nodeIds = do
 -- maybeMap :: (a -> b)
 
 
-evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> Z3Converter a -> IO (Result, Either [AST] String)
+evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> Z3Converter a -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
 
@@ -235,7 +235,8 @@ evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
       (r, model) <- getModel
       modelOrCore <- case model of
         Nothing -> do
-          Left <$> getUnsatCore
+          core <- getUnsatCore
+          Left <$> mapM astToString core
         Just m -> Right <$> showModel m
       pure (r, modelOrCore)
 
@@ -560,7 +561,7 @@ main = do
           print r
 
           case modelStr_maybe of
-            Left core -> putStrLn "Unsat core:" >> print core
+            Left core -> putStrLn $ "Unsat core:\n" <> unlines core
             Right modelStr -> do
               putStrLn $ "Model:\n" <> modelStr
 
