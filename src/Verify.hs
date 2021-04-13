@@ -17,6 +17,8 @@
 {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
 import           Language.C
+import           Language.C.System.Preprocess
+import           Language.C.System.GCC
 import           Language.C.Data.Ident
 
 import           Z3.Monad
@@ -489,34 +491,47 @@ nodeIdLocInfo = unlines . map go
 getAnns :: CTranslationUnit a -> [a]
 getAnns = foldMap (:[])
 
+gccPath :: FilePath
+gccPath = "/usr/bin/gcc"
 
 main :: IO ()
 main = do
   let fileName = "../test.c"
 
-  stream <- readInputStream fileName
+  let gcc = newGCC gccPath
 
-  case parseC stream (initPos fileName) of
-    Left err -> error (show err)
-    Right parsed -> do
-      let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
-          parsed'' = first (fmap snd) parsed'
-          constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
-          nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
+  stream_either <- runPreprocessor gcc $ CppArgs
+    { cppOptions = []
+    , extraOptions = []
+    , cppTmpDir = Nothing
+    , inputFile = fileName
+    , outputFile = Nothing
+    }
 
-      putStrLn $ ppr constraints
-      -- putStrLn (nodeIdLocInfo nodeLocs)
-      -- print parsed'
+  case stream_either of
+    Left err -> putStrLn $ "Preprocessing failed: " ++ show err
+    Right stream -> do
+      case parseC stream (initPos fileName) of
+        Left err -> error (show err)
+        Right parsed -> do
+          let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
+              parsed'' = first (fmap snd) parsed'
+              constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
+              nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
-      -- (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-      --                                        (Set.toList (getNodeIds constraints))
-      --                                        (Set.toList (getSPairs constraints))
-      --                                        (Set.toList (getTPairs constraints))
-      --                                        (constraintsToZ3 constraints)
-      -- print r
+          putStrLn $ ppr constraints
+          -- putStrLn (nodeIdLocInfo nodeLocs)
+          -- print parsed'
 
-      -- case modelStr_maybe of
-      --   Nothing -> putStrLn "No model generated"
-      --   Just modelStr -> do
-      --     putStrLn $ "Model:\n" <> modelStr
+          (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
+                                                 (Set.toList (getNodeIds constraints))
+                                                 (Set.toList (getSPairs constraints))
+                                                 (Set.toList (getTPairs constraints))
+                                                 (constraintsToZ3 constraints)
+          print r
+
+          case modelStr_maybe of
+            Nothing -> putStrLn "No model generated"
+            Just modelStr -> do
+              putStrLn $ "Model:\n" <> modelStr
 

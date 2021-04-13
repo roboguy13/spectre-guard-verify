@@ -182,7 +182,7 @@ pattern Atom_E x = SetFamily (Atom_E' x)
 instance Ppr (AtomicSet freeVars) where
   ppr (SetFamily x) = ppr x
   -- ppr (Single x y) = "{(" ++ show x ++ ", " ++ ppr y ++ ")}"
-  ppr (SingleVar v) = show v
+  ppr (SingleVar v) = "{" ++ show v ++ "}"
 
 instance Ppr (SetFamily freeVars) where
   ppr (C_Exit' n) = "C_exit(" ++ ppr n ++ ")"
