@@ -148,7 +148,7 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
       secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
 
       join $ mkIte <$> applySetRelation (C_Exit' n) vars
-        <*> join (mkIte <$> (mkExists [] [s'_sym] [sens_sort]
+        <*> join (mkIte <$> (mkExistsConst [] [s'_sym]
                               =<< applySetRelation (C_Exit' m) [v, s'_var]
                             )
                         <*> applySetRelation (Atom_S' m n) [v, secret]
@@ -169,13 +169,23 @@ generateT's tPairs = do
     sens_t <- lookupZ3FuncDecl (Sens_T m n)
     n_z3 <- join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
 
-    assert =<< mkForall [] [v_sym] [var_sort]
-      =<< join
-        (mkIte <$> (mkExists [] [s_sym] [sens_sort]
-                     =<< (z3M mkAnd [mkEq s_var secret, applySetRelation (Atom_S' m n) [v_var, s_var]]))
-               <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret)
-               <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public)
-        )
+    assert =<<
+      join (mkImplies <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, s_var]))
+                 <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret))
+
+    assert =<<
+      join (mkImplies <$> join (mkNot <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, s_var])))
+                 <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public))
+
+    -- assert =<< mkExists [] [v_sym] [var_sort]
+    --   =<< join (mkImplies 
+        -- (mkIte <$> (mkExists [] [s_sym] [sens_sort]
+        --              =<< (z3M mkAnd [mkEq s_var secret, applySetRelation (Atom_S' m n) [v_var, s_var]]))
+
+        -- (mkIte <$> (applySetRelation (Atom_S' m n) [v_var, secret])
+        --        <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret)
+        --        <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public)
+        -- )
 
 notCorrectnessCondition :: [NodeId] -> Z3Converter ()
 notCorrectnessCondition nodeIds = do
@@ -192,8 +202,8 @@ notCorrectnessCondition nodeIds = do
     (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
 
 
-    assert =<< mkNot =<<
-      mkForall [] [v_sym, s_sym, s'_sym] [var_sort, sens_sort, sens_sort]
+    assert =<< -- mkNot =<<
+      mkForallConst [] [v_sym, s_sym, s'_sym]
         =<< join
           (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
                                 ,join (mkEq <$> applySetRelation (C_Exit' n) [v, s'] <*> pure true)])
@@ -273,7 +283,7 @@ applyFamilyFnM sf0 restArgs = do
   mkAppM sf (map pure args ++ restArgs)
 
 class FreeVars (a :: [Type]) where
-  freeVars :: f a -> Z3Converter [(Sort, Symbol, AST)]
+  freeVars :: f a -> Z3Converter [(Sort, App, AST)]
 
 -- NOTE: We do not worry about name collisions since there should be no
 -- nested foralls currently. If there is a nested forall, this will need to
@@ -288,7 +298,7 @@ instance FreeVars xs => FreeVars (SensExpr : xs) where
   freeVars _ = (:) <$> mkSymVar "s" Sens_Sort <*> freeVars (Proxy @xs)
 
 class FreeVarsE f where
-  freeVarsE :: f a -> Z3Converter [(Sort, Symbol, AST)]
+  freeVarsE :: f a -> Z3Converter [(Sort, App, AST)]
 
 instance FreeVarsE SetFamily where
   freeVarsE e@(C_Exit' {}) = freeVars e
@@ -349,22 +359,23 @@ forallQuantifyFreeVars e k = do
       syms = map (\(_, x, _) -> x) fvs
       vars = map (\(_, _, x) -> x) fvs
 
-  mkForall [] syms sorts =<< k vars
+  mkForallConst [] syms =<< k vars
 
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
 
 
-mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, Symbol, AST)
+mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, App, AST)
 mkSymVar name z3sort = do
   uniq <- get
   modify succ
 
   sort <- lookupZ3Sort z3sort
-  sym <- mkStringSymbol (name ++ "__" ++ show uniq)
+  -- sym <- mkStringSymbol (name ++ "__" ++ show uniq)
 
-  var <- mkVar sym sort
-  return (sort, sym, var)
+  var <- mkFreshVar name sort
+  app <- toApp var
+  return (sort, app, var)
 
 -- mkFreshVarWith :: Z3Sort -> Z3Converter (Sort, Symbol, AST)
 -- mkFreshVarWith z3sort = do
@@ -445,7 +456,7 @@ instance ToZ3 SetConstraint where
     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
     let vs = [v_var, s_var]
 
-    mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
+    mkForallConst [] [v_sym, s_sym]
       =<< (z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
                          ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
                                     ,join (mkEq s_var <$> toZ3 s0)
@@ -466,7 +477,7 @@ instance ToZ3 SetConstraint where
     z3_t <- applySetRelation t vs
     z3_f <- applySetRelation f vs
 
-    mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
+    mkForallConst [] [v_sym, s_sym]
       =<< join (mkIte eql <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
 
 
@@ -520,19 +531,20 @@ main = do
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
 
           putStrLn $ ppr constraints
-          print parsed'
+          -- print parsed'
+
           -- putStrLn (nodeIdLocInfo nodeLocs)
           -- print parsed'
 
-          -- (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-          --                                        (Set.toList (getNodeIds constraints))
-          --                                        (Set.toList (getSPairs constraints))
-          --                                        (Set.toList (getTPairs constraints))
-          --                                        (constraintsToZ3 constraints)
-          -- print r
+          (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
+                                                 (Set.toList (getNodeIds constraints))
+                                                 (Set.toList (getSPairs constraints))
+                                                 (Set.toList (getTPairs constraints))
+                                                 (constraintsToZ3 constraints)
+          print r
 
-          -- case modelStr_maybe of
-          --   Nothing -> putStrLn "No model generated"
-          --   Just modelStr -> do
-          --     putStrLn $ "Model:\n" <> modelStr
+          case modelStr_maybe of
+            Nothing -> putStrLn "No model generated"
+            Just modelStr -> do
+              putStrLn $ "Model:\n" <> modelStr
 
