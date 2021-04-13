@@ -208,8 +208,10 @@ notCorrectnessCondition nodeIds = do
     (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
     (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
 
+    track <- mkFreshBoolVar $ "track" ++ show (getNodeId n)
 
-    assert =<< -- mkNot =<<
+
+    solverAssertAndTrack track =<< mkNot =<<
       mkForallConst [] [v_sym, s_sym, s'_sym]
         =<< join
           (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
@@ -220,7 +222,8 @@ notCorrectnessCondition nodeIds = do
 
 -- maybeMap :: (a -> b)
 
-evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> Z3Converter a -> IO (Result, Maybe String)
+
+evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> Z3Converter a -> IO (Result, Either [AST] String)
 evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
 
@@ -230,10 +233,11 @@ evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
       liftIO $ putStrLn str
       check
       (r, model) <- getModel
-      modelStr <- case model of
-        Nothing -> pure Nothing
-        Just m -> Just <$> showModel m
-      pure (r, modelStr)
+      modelOrCore <- case model of
+        Nothing -> do
+          Left <$> getUnsatCore
+        Just m -> Right <$> showModel m
+      pure (r, modelOrCore)
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -407,7 +411,7 @@ instance ToZ3 SensExpr where
 instance ToZ3 SetConstraint where
   toZ3 (lhs :=: SE_Empty) = do
     forallQuantifyFreeVars lhs $ \vars -> do
-      mkNot =<< applySetRelation lhs vars
+      join $ mkEq <$> applySetRelation lhs vars <*> mkFalse
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v)) = do
     z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
@@ -556,7 +560,7 @@ main = do
           print r
 
           case modelStr_maybe of
-            Nothing -> putStrLn "No model generated"
-            Just modelStr -> do
+            Left core -> putStrLn "Unsat core:" >> print core
+            Right modelStr -> do
               putStrLn $ "Model:\n" <> modelStr
 
