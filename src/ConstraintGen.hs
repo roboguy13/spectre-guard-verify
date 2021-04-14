@@ -128,6 +128,8 @@ handleStmt e0@(CIf cond t f_maybe l) = do
 
   handleStmt t
 
+  tell [atom_e (annotation e0) :=: atom_e (annotation cond)]
+
   case f_maybe of
     Nothing -> pure ()
     Just f -> handleStmt f

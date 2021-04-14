@@ -169,13 +169,15 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
 
   forM_ sPairs $ \(m, n) ->
     assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
+      -- (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
 
       secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
       public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
 
-      join $ mkIte <$> applySetRelation (C_Exit' n) vars
-                   <*> join (mkIte <$> (z3M mkOr [applySetRelation (C_Exit' m) [v, secret], applySetRelation (C_Exit' m) [v, public]])
+      liftIO $ print ("atom_e", m, n)
+
+      join $ mkIte <$> applySetRelation (C_Entry' n) vars
+                   <*> join (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]] --applySetRelation (Atom_E' m) [v]
                                    <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <*> mkTrue)
                                    <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <*> mkTrue))
                    <*> join (mkEq <$> mkTrue <*> mkTrue))
