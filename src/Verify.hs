@@ -338,8 +338,14 @@ instance Z3SetRelation (SetExpr a) where
   applySetRelation (SE_Union x y) args = do
     z3M mkOr [applySetRelation x args, applySetRelation y args]
 
-  applySetRelation (SE_UnionSingle x v s) _args =
-    applySetRelationM x [toZ3 v, toZ3 s]
+  applySetRelation (SE_UnionSingle x v s) args@[v',s'] = do
+    z3_v <- toZ3 v
+    z3_s <- toZ3 s
+
+    z3M mkOr [ applySetRelation x args
+             , z3M mkAnd [mkEq z3_v v', mkEq z3_s s']
+             ]
+    -- applySetRelationM x [toZ3 v, toZ3 s]
 
   applySetRelation (SE_IfThenElse (SensEqual sensX sensY) t f) args = do
     z3_sensX <- toZ3 sensX
