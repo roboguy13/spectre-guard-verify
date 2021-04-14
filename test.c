@@ -1,7 +1,8 @@
 int test() {
   int y __attribute__((nospec));
+  int z;
   int x;
-  x = y;
+  x = z;
   /*
   if (y == 0) {
     x = 3;
