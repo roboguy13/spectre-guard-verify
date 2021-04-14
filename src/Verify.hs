@@ -14,7 +14,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
+-- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
 import           Language.C
 import           Language.C.System.Preprocess
@@ -41,6 +41,15 @@ import           Orphans ()
 import           Ppr
 import           SetExpr
 import           ConstraintGen
+
+generateUnsatCores :: Bool
+generateUnsatCores = True
+
+trackingAssert :: MonadZ3 z3 => AST -> AST -> z3 ()
+trackingAssert =
+  if generateUnsatCores
+    then solverAssertAndTrack
+    else const assert
 
 instance MonadZ3 m => MonadZ3 (StateT a m) where
   getSolver = lift getSolver
@@ -107,7 +116,7 @@ defineZ3Names vars nodeIds = do
     c_entry_fns <- zip nodeIds <$> buildFn [var_sort, sens_sort] bool_sort c_entry_syms
     s_fns <- zip nodeIds <$> buildFn [node_sort, var_sort, sens_sort] bool_sort s_syms
 
-    t_fns <- zip nodeIds <$> buildFn [node_sort] sens_sort t_syms
+    t_fns <- zip nodeIds <$> buildFn [] sens_sort t_syms
 
     e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
 
@@ -126,7 +135,7 @@ defineZ3Names vars nodeIds = do
        , z3Info_sensExprDecls = \case
             SensAtom Public -> public_fn
             SensAtom Secret -> secret_fn
-            Sens_T x _y -> lookup' x t_fns
+            Sens_T x -> lookup' x t_fns
 
        , z3Info_varDecls = \v -> lookup' v var_fns
        , z3Info_nodeDecls = \n -> lookup' n node_fns
@@ -135,6 +144,23 @@ defineZ3Names vars nodeIds = do
           Var_Sort -> var_sort
           Node_Sort -> node_sort
        }
+
+consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter AST
+consistentSensitivity nodeIds f = do
+  true <- mkTrue
+
+  mkAnd =<< (forM nodeIds ( \n -> do
+    (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
+    (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
+    (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
+
+    mkForallConst [] [v_sym, s_sym, s'_sym]
+      =<< join
+        (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (f n) [v, s] <*> pure true)
+                              ,join (mkEq <$> applySetRelation (f n) [v, s'] <*> pure true)])
+               <*> mkEq s s'
+               <*> mkEq true true
+        )))
 
 generateS's :: [(NodeId, NodeId)] -> Z3Converter ()
 generateS's [] = pure ()
@@ -154,6 +180,13 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
                                    <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <*> mkTrue))
                    <*> join (mkEq <$> mkTrue <*> mkTrue))
 
+  let ms = Set.toList (Set.fromList (map fst sPairs))
+
+  forM_ ms $ \m -> do
+    let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
+    track <- mkFreshBoolVar "track"
+    trackingAssert track =<< consistentSensitivity ns (Atom_S' m)
+
       -- join $ mkIte <$> applySetRelation (C_Exit' n) vars
       --   <*> join (mkIte <$> (mkExistsConst [] [s'_sym]
       --                         =<< applySetRelation (C_Exit' m) [v, s'_var]
@@ -163,26 +196,74 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
       --            )
       --   <*> mkEq true true)
 
-generateT's :: [(NodeId, NodeId)] -> Z3Converter ()
-generateT's tPairs = do
+mkBiImply :: MonadZ3 z3 => AST -> AST -> z3 AST
+mkBiImply x y =
+  z3M mkAnd
+    [ mkImplies x y
+    , mkImplies y x
+    ]
+
+generateT's :: [NodeId] -> Z3Converter ()
+generateT's tNodes = do
   true <- mkTrue
 
-  forM_ tPairs $ \(m, n) -> do
-    (sens_sort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+  -- liftIO $ print ("tPairs", tPairs)
+
+  forM_ tNodes $ \n -> do
+    -- (sens_sort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
     (var_sort, v_sym, v_var) <- mkSymVar "v" Var_Sort
 
     secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
     public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
-    sens_t <- lookupZ3FuncDecl (Sens_T m n)
+    sens_t <- lookupZ3FuncDecl (Sens_T n)
     n_z3 <- join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
 
     assert =<<
-      join (mkImplies <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, s_var]))
-                 <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret))
+      join (mkIte <$> join (mkForallConst [] [v_sym] <$> (applySetRelation (C_Entry n) [v_var, public]))
+                  <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
+                  <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
 
-    assert =<<
-      join (mkImplies <$> join (mkNot <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, s_var])))
-                 <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public))
+    -- assert =<<
+    --   join (mkImplies <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, secret]))
+    --              <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret))
+
+    -- assert =<<
+    --   join (mkImplies <$> join (mkNot <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, secret])))
+    --              <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public))
+
+  
+  -- let ms = Set.toList (Set.fromList (map fst tPairs))
+
+  -- true <- mkTrue
+
+  -- secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
+  -- public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
+
+  -- track <- mkFreshBoolVar "track"
+
+  -- trackingAssert track =<< (mkAnd =<< (forM tPairs ( \(m, n) -> do
+  --   s_fn <- lookupZ3FuncDecl (Sens_T m n)
+
+  --   --trackingAssert track =<< -- mkNot =<<
+  --   mkForallConst [] [v_sym, s_sym, s'_sym]
+  --     =<< join (mkEq <$> mkApp s_fn [s] <*> mkApp s_fn [s']))))
+  --       -- (mkIte <$> (z3M mkAnd [join (mkEq <$> mkApp s_fn [s] <*> pure true)
+  --       --                       ,join (mkEq <$> mkApp s_fn [s'] <*> pure true)])
+  --       --        <*> mkEq s s'
+  --       --        <*> mkEq true true
+  --       -- )))
+
+
+  -- forM_ ms $ \m -> do
+  --   let ns = map snd $ filter (\(m', n) -> m' == m) tPairs
+  --   assert =<< consistentSensitivity ns (Sens_T m)
+
+
+  -- let ms = Set.toList (Set.fromList (map fst tPairs))
+
+  -- forM_ ms $ \m -> do
+  --   let ns = map snd $ filter (\(m', n) -> m' == m) tPairs
+  --   consistentSensitivity ns (Sens_T m)
 
     -- assert =<< mkExists [] [v_sym] [var_sort]
     --   =<< join (mkImplies 
@@ -198,36 +279,39 @@ notCorrectnessCondition :: [NodeId] -> Z3Converter ()
 notCorrectnessCondition nodeIds = do
   -- (node_sort, n_sym, n) <- mkSymVar "n" Node_Sort
 
-  true <- mkTrue
+  track <- mkFreshBoolVar "track"
+  {- trackingAssert track -}
+  assert =<< consistentSensitivity nodeIds C_Exit'
 
-  secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
-  public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
+  -- true <- mkTrue
 
-  forM_ nodeIds $ \n -> do
-    (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
-    (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
-    (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
+  -- secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
+  -- public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
 
-    track <- mkFreshBoolVar $ "track" ++ show (getNodeId n)
+  -- forM_ nodeIds $ \n -> do
+  --   (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
+  --   (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
+  --   (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
 
 
-    solverAssertAndTrack track =<< -- mkNot =<<
-      mkForallConst [] [v_sym, s_sym, s'_sym]
-        =<< join
-          (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
-                                ,join (mkEq <$> applySetRelation (C_Exit' n) [v, s'] <*> pure true)])
-                 <*> mkEq s s'
-                 <*> mkEq true true
-          )
+
+  --   trackingAssert track =<< -- mkNot =<<
+  --     mkForallConst [] [v_sym, s_sym, s'_sym]
+  --       =<< join
+  --         (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
+  --                               ,join (mkEq <$> applySetRelation (C_Exit' n) [v, s'] <*> pure true)])
+  --                <*> mkEq s s'
+  --                <*> mkEq true true
+  --         )
 
 -- maybeMap :: (a -> b)
 
 
-evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> Z3Converter a -> IO (Result, Either [String] String)
-evalZ3Converter vars nodeIds sPairs tPairs (Z3Converter conv) = evalZ3 $ do
+evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
+evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
   z3Info <- defineZ3Names vars nodeIds
 
-  case (generateS's sPairs, generateT's tPairs, notCorrectnessCondition nodeIds) of
+  case (generateS's sPairs, generateT's tNodes, notCorrectnessCondition nodeIds) of
     (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter notCorrectnessCondition) -> do
       str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> notCorrectnessCondition >> solverToString) z3Info
       liftIO $ putStrLn str
@@ -335,6 +419,15 @@ class Z3SetRelation a where
   applySetRelationM :: a -> [Z3Converter AST] -> Z3Converter AST
   applySetRelationM sr xs = applySetRelation sr =<< sequence xs
 
+-- instance Z3SetRelation SensExpr where
+--   applySetRelation s@(Sens_T x y) [sens] = do
+--     z3_s <- lookupZ3FuncDecl s
+--     y' <- toZ3 y
+--     join $ mkEq <$> (mkApp z3_s [y']) <*> pure sens
+--     -- mkApp z3_t (y':args)
+
+--   applySetRelation _ _ = error "applySetRelation: unsupported SensExpr"
+
 instance Z3SetRelation (SetFamily a) where
   applySetRelation sr = applyFamilyFnM sr . map pure
   applySetRelationM = applyFamilyFnM
@@ -404,9 +497,9 @@ instance ToZ3 SensExpr where
   toZ3 s@(SensAtom _) =
     join $ mkApp <$> (lookupZ3FuncDecl s) <*> pure []
 
-  toZ3 s@(Sens_T x y) = do
+  toZ3 s@(Sens_T x) = do
     z3_t <- lookupZ3FuncDecl s
-    mkAppM z3_t [toZ3 y]
+    mkAppM z3_t []
 
 
 instance ToZ3 SetConstraint where
@@ -508,7 +601,8 @@ constraintsToZ3 cs = do
   forM_ astsZipped $ \(ast, n) -> do
     track <- mkFreshBoolVar $ "ast" ++ show n
 
-    solverAssertAndTrack track ast
+    {- trackingAssert track -}
+    assert ast
 
 nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
 nodeIdToLoc transUnit nodeId =
@@ -552,17 +646,24 @@ main = do
               parsed'' = first (fmap snd) parsed'
               constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
+              theNodeIds = getNodeIds constraints
 
           putStrLn $ ppr constraints
-          -- print parsed'
 
           -- putStrLn (nodeIdLocInfo nodeLocs)
-          -- print parsed'
+          print parsed'
+
+          let tPairs = getTNodes constraints
+              sPairs = getSPairs constraints
+          -- let sPairs = tPairs `Set.union` getSPairs constraints
+
+          print sPairs
+          print tPairs
 
           (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-                                                 (Set.toList (getNodeIds constraints))
-                                                 (Set.toList (getSPairs constraints))
-                                                 (Set.toList (getTPairs constraints))
+                                                 (Set.toList theNodeIds)
+                                                 (Set.toList sPairs)
+                                                 (Set.toList tPairs)
                                                  (constraintsToZ3 constraints)
           print r
 

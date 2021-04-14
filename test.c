@@ -1,7 +1,6 @@
 int test() {
-  int y;
+  int y __attribute__((nospec));
   int x;
-  y = 1;
   x = y;
   /*
   if (y == 0) {

@@ -47,12 +47,12 @@ instance Ppr Sensitivity where ppr = show
 
 data SensExpr
   = SensAtom Sensitivity
-  | Sens_T NodeId NodeId
+  | Sens_T NodeId
   deriving (Show)
 
 instance Ppr SensExpr where
   ppr (SensAtom x) = ppr x
-  ppr (Sens_T x y) = "T(" ++ ppr x ++ ", " ++ ppr y ++ ")"
+  ppr (Sens_T x) = "T(" ++ ppr x ++ ")"
 
 data SetConstraint =
   forall freeVars.
@@ -99,17 +99,17 @@ class ExprConstNames a where
   getVars :: a -> Set Int
   getNodeIds :: a -> Set NodeId
   getSPairs :: a -> Set (NodeId, NodeId)
-  getTPairs :: a -> Set (NodeId, NodeId)
+  getTNodes :: a -> Set NodeId
 
 instance ExprConstNames SensExpr where
   getVars _ = mempty
   getNodeIds (SensAtom _) = mempty
-  getNodeIds (Sens_T x y) = Set.fromList [x, y]
+  getNodeIds (Sens_T x) = Set.fromList [x]
 
   getSPairs _ = mempty
 
-  getTPairs (Sens_T x y) = Set.singleton (x, y)
-  getTPairs _ = mempty
+  getTNodes (Sens_T x) = Set.singleton x
+  getTNodes _ = mempty
 
 instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
@@ -130,11 +130,11 @@ instance ExprConstNames (SetExpr freeVars) where
   getSPairs (SE_IfThenElse (sA, sB) x y) = getSPairs sA <> getSPairs sB <> getSPairs x <> getSPairs y
   getSPairs SE_Empty = mempty
 
-  getTPairs (SE_Atom x) = getTPairs x
-  getTPairs (SE_Union x y) = getTPairs x <> getTPairs y
-  getTPairs (SE_UnionSingle x v s) = getTPairs x <> getTPairs s
-  getTPairs (SE_IfThenElse (sA, sB) x y) = getTPairs sA <> getTPairs sB <> getTPairs x <> getTPairs y
-  getTPairs SE_Empty = mempty
+  getTNodes (SE_Atom x) = getTNodes x
+  getTNodes (SE_Union x y) = getTNodes x <> getTNodes y
+  getTNodes (SE_UnionSingle x v s) = getTNodes x <> getTNodes s
+  getTNodes (SE_IfThenElse (sA, sB) x y) = getTNodes sA <> getTNodes sB <> getTNodes x <> getTNodes y
+  getTNodes SE_Empty = mempty
 
 
 instance ExprConstNames (AtomicSet freeVars) where
@@ -147,8 +147,8 @@ instance ExprConstNames (AtomicSet freeVars) where
   getSPairs (SetFamily sf) = getSPairs sf
   getSPairs _ = mempty
 
-  getTPairs (SetFamily sf) = getTPairs sf
-  getTPairs _ = mempty
+  getTNodes (SetFamily sf) = getTNodes sf
+  getTNodes _ = mempty
 
 instance ExprConstNames (SetFamily freeVars) where
   getVars _ = mempty
@@ -160,19 +160,19 @@ instance ExprConstNames (SetFamily freeVars) where
   getSPairs (Atom_S' x y) = Set.singleton (x, y)
   getSPairs _ = mempty
 
-  getTPairs _ = mempty
+  getTNodes _ = mempty
 
 instance ExprConstNames SetConstraint where
   getVars (x :=: y) = getVars x <> getVars y
   getNodeIds (x :=: y) = getNodeIds x <> getNodeIds y
   getSPairs (x :=: y) = getSPairs x <> getSPairs y
-  getTPairs (x :=: y) = getTPairs x <> getTPairs y
+  getTNodes (x :=: y) = getTNodes x <> getTNodes y
 
 instance ExprConstNames SetConstraints where
   getVars = foldr Set.union mempty . map getVars
   getNodeIds = foldr Set.union mempty . map getNodeIds
   getSPairs = foldr Set.union mempty . map getSPairs
-  getTPairs = foldr Set.union mempty . map getTPairs
+  getTNodes = foldr Set.union mempty . map getTNodes
 
 pattern C_Exit x = SetFamily (C_Exit' x)
 pattern C_Entry x = SetFamily (C_Entry' x)

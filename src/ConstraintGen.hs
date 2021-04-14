@@ -27,17 +27,20 @@ constActionUncurry f (x, y) = f x y *> pure (x, y)
 constAction :: Applicative f => (a -> f ()) -> a -> f a
 constAction f x = f x *> pure x
 
-isNoSpecAttr :: CAttribute a -> Bool
+isNoSpecAttr :: Show a => CAttribute a -> Bool
 isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
 isNoSpecAttr _ = False
 
 handleDeclarator :: CDeclarator NodeId -> ConstraintGen ()
 handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
+      mapM_ (sameNode e) attrs
+
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Secret)]
 
   | otherwise = do
+      mapM_ (sameNode e) attrs
       tell [c_exit n :=: SE_UnionSingle (c_entry n)
                                   hash (SensAtom Public)]
 
@@ -45,46 +48,56 @@ handleDeclarator e = nop e
 
 handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
 handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
-handleCompoundItem (CBlockDecl e@(CDecl _ xs _)) = do
-    nop e
-    case catMaybes $ map (\(z, _, _) -> z) xs of
-      [] -> pure ()
-      xs'@(x:_) -> do
-        e `connect` x
-        connectList xs'
+handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
+    -- nop e
+
+    mapM_ (sameNode e) declSpec
+
+    -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
+
+    -- case catMaybes $ map (\(z, _, _) -> z) xs of
+    --   [] -> pure ()
+    --   xs'@(x:_) -> do
+    --     e `connect` x
+    --     connectList xs'
+
     mapM_ go xs
   where
-    go (Just declr, _, _) = handleDeclarator declr
+    go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
     go _ = pure ()
-handleCompoundItem (CBlockDecl {}) = pure ()
+-- handleCompoundItem (CBlockDecl {}) = pure ()
+handleCompoundItem (CBlockDecl e) = nop e
 handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
 handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
 handleExpr :: CExpression NodeId -> ConstraintGen ()
-handleExpr (CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
+handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
+  e0 `connect` e
+
   handleExpr cv
-  tell [ c_exit n :=: (SE_UnionSingle (c_entry n) x (Sens_T n m)) ]
+  tell [ c_exit n :=: (SE_UnionSingle (c_entry n) x (Sens_T n)) ]
     *> handleExpr e
 
-handleExpr expr =
+handleExpr expr = do
+  nop expr
   case expr of
     CVar (Ident _ v _) _ -> tell [ atom_e exprNodeId :=: singleVar v ]
     _ -> do
-      nop expr
       forM_ (children expr) $ \c -> do
-        tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
+        -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
+        sameNode c expr
         handleExpr c
       -- mapM_ handleExpr $ children expr
       -- go nodeIds
   where
-    go :: [AtomicSet '[Var]] -> ConstraintGen ()
-    go [] = pure ()
-    go [x] = tell [ atom_e exprNodeId :=: SE_Atom x ]-- pure () --tell [ atom_e exprNodeId :=: x ]
-    go (x:y:rest) = do
-      tell [atom_e exprNodeId :=: SE_Union x (SE_Atom y)]
-      go (y:rest)
+  --   go :: [AtomicSet '[Var]] -> ConstraintGen ()
+  --   go [] = pure ()
+  --   go [x] = tell [ atom_e exprNodeId :=: SE_Atom x ]-- pure () --tell [ atom_e exprNodeId :=: x ]
+  --   go (x:y:rest) = do
+  --     tell [atom_e exprNodeId :=: SE_Union x (SE_Atom y)]
+  --     go (y:rest)
 
     exprNodeId = annotation expr
 
@@ -92,17 +105,27 @@ handleExpr expr =
 
 handleStmt :: CStatement NodeId -> ConstraintGen ()
 handleStmt e0@(CExpr (Just e) _) = do
+  nop e0
   e0 `connect` e
   handleExpr e
-handleStmt (CIf cond t f_maybe l) = handleExpr cond *> tell go *> handleStmt t *>
-    case f_maybe of
-      Nothing -> pure ()
-      Just f -> handleStmt f
+handleStmt e0@(CIf cond t f_maybe l) = do
+  handleExpr cond
+
+  -- e0 `connect` cond
+  tell [ c_entry (annotation cond) :=: c_entry l ]
+
+  tell go
+
+  handleStmt t
+
+  case f_maybe of
+    Nothing -> pure ()
+    Just f -> handleStmt f
   where
     go =
       [entryConstraint t
       ,c_exit l :=: SE_Union (c_entry l)
-                             (SE_IfThenElse (Sens_T l p, SensAtom Secret)
+                             (SE_IfThenElse (Sens_T l, SensAtom Secret)
                                (maybeUnion (atom_s l m) (atom_s l))
                                (maybeUnion (c_exit m) c_exit))
       ] ++
@@ -128,22 +151,19 @@ handleStmt e@(CCompound _ items _) = do
     (firstItem:_) -> --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
       e `connect` firstItem
 
-  go items
+  connectList items
   mapM_ handleCompoundItem items
-  where
-    go [] = pure ()
-    go [_] = pure ()
-    go (x:y:rest) = do
-      tell
-        [ c_entry (annotation y) :=: c_exit (annotation x)
-        ]
-      go (y:rest)
 
 handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
+  nop e
+
   case children e of
-    [] -> nop e
+    [] -> pure ()
     cs@(c:_) -> do
       e `connect` c
+
+      connectList cs
+
       mapM_ handleStmt cs
 
 -- | Generate C_Exit(n) = C_Entry(n) constraint for given node
@@ -163,6 +183,14 @@ connect :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen (
 connect x y =
   tell
     [ c_entry (annotation y) :=: c_exit (annotation x) ]
+
+-- | Combine two nodes, to behave as one
+sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen ()
+sameNode x y =
+  tell
+    [ c_entry (annotation x) :=: c_entry (annotation y)
+    , c_exit  (annotation x) :=: c_exit  (annotation y)
+    ]
 
 -- TODO: Connect to following nodes
 handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
