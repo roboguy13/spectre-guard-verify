@@ -145,11 +145,11 @@ defineZ3Names vars nodeIds = do
           Node_Sort -> node_sort
        }
 
-consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter AST
+consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
 consistentSensitivity nodeIds f = do
   true <- mkTrue
 
-  mkAnd =<< (forM nodeIds ( \n -> do
+  (forM nodeIds ( \n -> do
     (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
     (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
     (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
@@ -169,15 +169,11 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
 
   forM_ sPairs $ \(m, n) ->
     assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      -- (sens_sort, s'_sym, s'_var) <- mkSymVar "s'" Sens_Sort
-
       secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
       public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
 
-      liftIO $ print ("atom_e", m, n)
-
       join $ mkIte <$> applySetRelation (C_Entry' n) vars
-                   <*> join (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]] --applySetRelation (Atom_E' m) [v]
+                   <*> join (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
                                    <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <*> mkTrue)
                                    <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <*> mkTrue))
                    <*> join (mkEq <$> mkTrue <*> mkTrue))
@@ -186,7 +182,7 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
 
   forM_ ms $ \m -> do
     let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
-    trackingAssert =<< consistentSensitivity ns (Atom_S' m)
+    trackingAssert =<< mkAnd =<< (consistentSensitivity ns (Atom_S' m))
 
 generateT's :: [NodeId] -> Z3Converter ()
 generateT's tNodes = do
@@ -210,18 +206,23 @@ generateT's tNodes = do
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
 
-notCorrectnessCondition :: [NodeId] -> Z3Converter ()
-notCorrectnessCondition nodeIds = do
-  trackingAssert =<< consistentSensitivity nodeIds C_Exit'
+correctnessCondition :: [NodeId] -> Z3Converter ()
+correctnessCondition nodeIds = do
+  asts <- consistentSensitivity nodeIds C_Exit'
+  mapM_ trackingAssert asts
 
 evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
+  params <- mkParams
+  join (paramsSetBool params <$> mkStringSymbol "core.minimize" <*> pure True)
+  solverSetParams params
+
   z3Info <- defineZ3Names vars nodeIds
 
-  case (generateS's sPairs, generateT's tNodes, notCorrectnessCondition nodeIds) of
-    (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter notCorrectnessCondition) -> do
-      str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> notCorrectnessCondition >> solverToString) z3Info
-      liftIO $ putStrLn str
+  case (generateS's sPairs, generateT's tNodes, correctnessCondition nodeIds) of
+    (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter correctnessCondition) -> do
+      str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> correctnessCondition >> solverToString) z3Info
+      -- liftIO $ putStrLn str
       check
       (r, model) <- getModel
       modelOrCore <- case model of
@@ -551,7 +552,7 @@ main = do
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
               theNodeIds = getNodeIds constraints
 
-          putStrLn $ ppr constraints
+          -- putStrLn $ ppr constraints
 
           -- putStrLn (nodeIdLocInfo nodeLocs)
 
@@ -561,8 +562,8 @@ main = do
               sPairs = getSPairs constraints
           -- let sPairs = tPairs `Set.union` getSPairs constraints
 
-          print sPairs
-          print tPairs
+          -- print sPairs
+          -- print tPairs
 
           (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
                                                  (Set.toList theNodeIds)

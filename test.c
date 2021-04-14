@@ -4,7 +4,7 @@ int test() {
   int x;
   x = z;
 
-  if (z == 0) {
+  if (y == 0) {
     x = 3;
   }
   return 1;
