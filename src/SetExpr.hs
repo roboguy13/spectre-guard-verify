@@ -63,19 +63,27 @@ data SetConstraint =
 instance Ppr SetConstraint where
   ppr (x :=: y) = ppr x ++ " = " ++ ppr y
 
+data Condition where
+  SensEqual :: SensExpr -> SensExpr -> Condition
+  PairIn :: (Int, Sensitivity) -> SetExpr freeVars -> Condition
+
 data SetExpr (freeVars :: [*]) where
   SE_Atom :: AtomicSet freeVars -> SetExpr freeVars
   SE_Union :: AtomicSet freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_UnionSingle :: SetExpr freeVars -> Int -> SensExpr -> SetExpr freeVars
-  SE_IfThenElse :: (SensExpr, SensExpr) -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
+  SE_IfThenElse :: Condition -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_Empty :: SetExpr freeVars
   -- deriving (Show)
+
+instance Ppr Condition where
+  ppr (SensEqual x y) = ppr x <> " = " <> ppr y
+  ppr (PairIn (x, s) y) = "(" <> show x <> ", " <> ppr s <> ") in " <> ppr y
 
 instance Ppr (SetExpr freeVars) where
   ppr (SE_Atom x) = ppr x
   ppr (SE_Union x y) = ppr x ++ " U " ++ ppr y
   ppr (SE_UnionSingle x v s) = ppr x ++ " U {(" ++ show v ++ ", " ++ ppr s ++ ")}"
-  ppr (SE_IfThenElse (x,y) t f) = "if (" ++ ppr x ++ " = " ++ ppr y ++ ") then " ++ ppr t ++ " else " ++ ppr f
+  ppr (SE_IfThenElse cond t f) = "if (" ++ ppr cond ++ ") then " ++ ppr t ++ " else " ++ ppr f
   ppr SE_Empty = "{}"
 
 type SetConstraints = [SetConstraint]
@@ -101,6 +109,19 @@ class ExprConstNames a where
   getSPairs :: a -> Set (NodeId, NodeId)
   getTNodes :: a -> Set NodeId
 
+instance ExprConstNames Condition where
+  getVars (SensEqual x y) = getVars x <> getVars y
+  getVars (PairIn _x y) = getVars y
+
+  getNodeIds (SensEqual x y) = getNodeIds x <> getNodeIds y
+  getNodeIds (PairIn _x y) = getNodeIds y
+
+  getSPairs (SensEqual x y) = getSPairs x <> getSPairs y
+  getSPairs (PairIn _x y) = getSPairs y
+
+  getTNodes (SensEqual x y) = getTNodes x <> getTNodes y
+  getTNodes (PairIn _x y) = getTNodes y
+
 instance ExprConstNames SensExpr where
   getVars _ = mempty
   getNodeIds (SensAtom _) = mempty
@@ -115,25 +136,25 @@ instance ExprConstNames (SetExpr freeVars) where
   getVars (SE_Atom x) = getVars x
   getVars (SE_Union x y) = getVars x <> getVars y
   getVars (SE_UnionSingle x v s) = getVars x <> Set.singleton v <> getVars s
-  getVars (SE_IfThenElse (sA, sB) x y) = getVars sA <> getVars sB <> getVars x <> getVars y
+  getVars (SE_IfThenElse cond x y) = getVars cond <> getVars x <> getVars y
   getVars SE_Empty = mempty
 
   getNodeIds (SE_Atom x) = getNodeIds x
   getNodeIds (SE_Union x y) = getNodeIds x <> getNodeIds y
   getNodeIds (SE_UnionSingle x v s) = getNodeIds x <> getNodeIds s
-  getNodeIds (SE_IfThenElse (sA, sB) x y) = getNodeIds sA <> getNodeIds sB <> getNodeIds x <> getNodeIds y
+  getNodeIds (SE_IfThenElse cond x y) = getNodeIds cond <> getNodeIds x <> getNodeIds y
   getNodeIds SE_Empty = mempty
 
   getSPairs (SE_Atom x) = getSPairs x
   getSPairs (SE_Union x y) = getSPairs x <> getSPairs y
   getSPairs (SE_UnionSingle x v s) = getSPairs x <> getSPairs s
-  getSPairs (SE_IfThenElse (sA, sB) x y) = getSPairs sA <> getSPairs sB <> getSPairs x <> getSPairs y
+  getSPairs (SE_IfThenElse cond x y) = getSPairs cond <> getSPairs x <> getSPairs y
   getSPairs SE_Empty = mempty
 
   getTNodes (SE_Atom x) = getTNodes x
   getTNodes (SE_Union x y) = getTNodes x <> getTNodes y
   getTNodes (SE_UnionSingle x v s) = getTNodes x <> getTNodes s
-  getTNodes (SE_IfThenElse (sA, sB) x y) = getTNodes sA <> getTNodes sB <> getTNodes x <> getTNodes y
+  getTNodes (SE_IfThenElse cond x y) = getTNodes cond <> getTNodes x <> getTNodes y
   getTNodes SE_Empty = mempty
 
 

@@ -186,13 +186,6 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
     let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
     trackingAssert =<< consistentSensitivity ns (Atom_S' m)
 
-mkBiImply :: MonadZ3 z3 => AST -> AST -> z3 AST
-mkBiImply x y =
-  z3M mkAnd
-    [ mkImplies x y
-    , mkImplies y x
-    ]
-
 generateT's :: [NodeId] -> Z3Converter ()
 generateT's tNodes = do
   true <- mkTrue
@@ -200,13 +193,18 @@ generateT's tNodes = do
   forM_ tNodes $ \n -> do
     (var_sort, v_sym, v_var) <- mkSymVar "v" Var_Sort
 
+    (_, v'_sym, v'_var) <- mkSymVar "v'" Var_Sort
+
     secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
     public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
     sens_t <- lookupZ3FuncDecl (Sens_T n)
     n_z3 <- join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
 
     assert =<<
-      join (mkIte <$> join (mkForallConst [] [v_sym] <$> (applySetRelation (C_Entry n) [v_var, public]))
+      join (mkIte <$> z3M mkOr
+                           [join (mkForallConst [] [v'_sym] <$> (mkNot =<< (applySetRelation (Atom_E' n) [v'_var])))
+                           ,join (mkForallConst [] [v_sym] <$> (z3M mkAnd [(applySetRelation (Atom_E' n) [v_var]), (applySetRelation (C_Entry n) [v_var, public])]))
+                           ]
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
 
@@ -343,13 +341,21 @@ instance Z3SetRelation (SetExpr a) where
   applySetRelation (SE_UnionSingle x v s) _args =
     applySetRelationM x [toZ3 v, toZ3 s]
 
-  applySetRelation (SE_IfThenElse (sensX, sensY) t f) args = do
+  applySetRelation (SE_IfThenElse (SensEqual sensX sensY) t f) args = do
     z3_sensX <- toZ3 sensX
     z3_sensY <- toZ3 sensY
 
     eql <- mkEq z3_sensX z3_sensY
 
     join $ mkIte eql <$> applySetRelation t args <*> applySetRelation f args
+
+  applySetRelation (SE_IfThenElse (PairIn (v, s) x) t f) args = do
+    z3_v <- toZ3 v
+    z3_s <- toZ3 s
+
+    cond <- applySetRelation x [z3_v, z3_s]
+
+    join $ mkIte cond <$> applySetRelation t args <*> applySetRelation f args
 
   applySetRelation SE_Empty _args = error "applySetRelation: SE_Empty"
 
@@ -384,6 +390,9 @@ instance ToZ3 NodeId where
 
 instance ToZ3 Int where
   toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
+
+instance ToZ3 Sensitivity where
+  toZ3 = toZ3 . SensAtom
 
 instance ToZ3 SensExpr where
   toZ3 s@(SensAtom _) =
@@ -439,7 +448,7 @@ instance ToZ3 SetConstraint where
                       <*> join (mkEq <$> applySetRelation lhs vs <*> mkTrue)
                       <*> join (mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs))
 
-  toZ3 (lhs :=: SE_IfThenElse (sensX, sensY) t f) = do
+  toZ3 (lhs :=: SE_IfThenElse (SensEqual sensX sensY) t f) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
     let vs = [v_var, s_var]
@@ -455,7 +464,22 @@ instance ToZ3 SetConstraint where
     mkForallConst [] [v_sym, s_sym]
       =<< join (mkIte eql <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
 
+  toZ3 (lhs :=: SE_IfThenElse (PairIn (v, s) x) t f) = do
 
+    z3_v <- toZ3 v
+    z3_s <- toZ3 s
+    
+    cond <- applySetRelation x [z3_v, z3_s]
+
+    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+    let vs = [v_var, s_var]
+
+    z3_t <- applySetRelation t vs
+    z3_f <- applySetRelation f vs
+
+    mkForallConst [] [v_sym, s_sym]
+      =<< join (mkIte cond <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
 
 constraintsToZ3 :: SetConstraints -> Z3Converter ()
 constraintsToZ3 cs = do

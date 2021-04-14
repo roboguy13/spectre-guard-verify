@@ -77,20 +77,30 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   e0 `connect` e
 
   handleExpr cv
-  tell [ c_exit n :=: (SE_UnionSingle (c_entry n) x (Sens_T n)) ]
+  tell [ c_exit n :=: SE_IfThenElse (PairIn (x, Public) (c_entry n))
+                                    (SE_UnionSingle (c_entry n) x (Sens_T (annotation e)))
+                                    (c_entry n)
+       ]
     *> handleExpr e
+
+handleExpr e@(CVar (Ident _ x _) _) =
+  tell [ atom_e (annotation e) :=: singleVar x ]
 
 handleExpr expr = do
   nop expr
-  case expr of
-    CVar (Ident _ v _) _ -> tell [ atom_e exprNodeId :=: singleVar v ]
-    _ -> do
-      forM_ (children expr) $ \c -> do
-        -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
-        sameNode c expr
-        handleExpr c
-      -- mapM_ handleExpr $ children expr
-      -- go nodeIds
+  let theChildren = children expr
+
+  case theChildren of
+    [] -> tell [ atom_e (annotation expr) :=: SE_Empty ]
+    (c:cs) ->
+      tell [ atom_e (annotation expr) :=: foldr SE_Union (atom_e (annotation c)) (map (atom_e . annotation) cs) ]
+
+  forM_ theChildren $ \c -> do
+    -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
+    sameNode c expr
+    handleExpr c
+  -- mapM_ handleExpr $ children expr
+  -- go nodeIds
   where
   --   go :: [AtomicSet '[Var]] -> ConstraintGen ()
   --   go [] = pure ()
@@ -125,7 +135,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
     go =
       [entryConstraint t
       ,c_exit l :=: SE_Union (c_entry l)
-                             (SE_IfThenElse (Sens_T l, SensAtom Secret)
+                             (SE_IfThenElse (Sens_T l `SensEqual` SensAtom Secret)
                                (maybeUnion (atom_s l m) (atom_s l))
                                (maybeUnion (c_exit m) c_exit))
       ] ++
