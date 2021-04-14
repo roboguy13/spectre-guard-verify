@@ -203,7 +203,7 @@ generateT's tNodes = do
     assert =<<
       join (mkIte <$> z3M mkOr
                            [join (mkForallConst [] [v'_sym] <$> (mkNot =<< (applySetRelation (Atom_E' n) [v'_var])))
-                           ,join (mkForallConst [] [v_sym] <$> (z3M mkAnd [(applySetRelation (Atom_E' n) [v_var]), (applySetRelation (C_Entry n) [v_var, public])]))
+                           ,join (mkForallConst [] [v_sym] <$> join (mkImplies <$> (applySetRelation (Atom_E' n) [v_var]) <*> (applySetRelation (C_Entry n) [v_var, public])))
                            ]
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
