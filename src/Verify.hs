@@ -45,11 +45,11 @@ import           ConstraintGen
 generateUnsatCores :: Bool
 generateUnsatCores = True
 
-trackingAssert :: MonadZ3 z3 => AST -> AST -> z3 ()
+trackingAssert :: MonadZ3 z3 => AST -> z3 ()
 trackingAssert =
   if generateUnsatCores
-    then solverAssertAndTrack
-    else const assert
+    then \x -> mkFreshBoolVar "track" >>= (`solverAssertAndTrack` x)
+    else assert
 
 instance MonadZ3 m => MonadZ3 (StateT a m) where
   getSolver = lift getSolver
@@ -184,17 +184,7 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
 
   forM_ ms $ \m -> do
     let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
-    track <- mkFreshBoolVar "track"
-    trackingAssert track =<< consistentSensitivity ns (Atom_S' m)
-
-      -- join $ mkIte <$> applySetRelation (C_Exit' n) vars
-      --   <*> join (mkIte <$> (mkExistsConst [] [s'_sym]
-      --                         =<< applySetRelation (C_Exit' m) [v, s'_var]
-      --                       )
-      --                   <*> applySetRelation (Atom_S' m n) [v, secret]
-      --                   <*> applySetRelation (Atom_S' m n) [v, s]
-      --            )
-      --   <*> mkEq true true)
+    trackingAssert =<< consistentSensitivity ns (Atom_S' m)
 
 mkBiImply :: MonadZ3 z3 => AST -> AST -> z3 AST
 mkBiImply x y =
@@ -207,10 +197,7 @@ generateT's :: [NodeId] -> Z3Converter ()
 generateT's tNodes = do
   true <- mkTrue
 
-  -- liftIO $ print ("tPairs", tPairs)
-
   forM_ tNodes $ \n -> do
-    -- (sens_sort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
     (var_sort, v_sym, v_var) <- mkSymVar "v" Var_Sort
 
     secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
@@ -223,89 +210,9 @@ generateT's tNodes = do
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
                   <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
 
-    -- assert =<<
-    --   join (mkImplies <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, secret]))
-    --              <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret))
-
-    -- assert =<<
-    --   join (mkImplies <$> join (mkNot <$> join (mkExistsConst [] [v_sym] <$> (applySetRelation (Atom_S' m n) [v_var, secret])))
-    --              <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public))
-
-  
-  -- let ms = Set.toList (Set.fromList (map fst tPairs))
-
-  -- true <- mkTrue
-
-  -- secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
-  -- public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
-
-  -- track <- mkFreshBoolVar "track"
-
-  -- trackingAssert track =<< (mkAnd =<< (forM tPairs ( \(m, n) -> do
-  --   s_fn <- lookupZ3FuncDecl (Sens_T m n)
-
-  --   --trackingAssert track =<< -- mkNot =<<
-  --   mkForallConst [] [v_sym, s_sym, s'_sym]
-  --     =<< join (mkEq <$> mkApp s_fn [s] <*> mkApp s_fn [s']))))
-  --       -- (mkIte <$> (z3M mkAnd [join (mkEq <$> mkApp s_fn [s] <*> pure true)
-  --       --                       ,join (mkEq <$> mkApp s_fn [s'] <*> pure true)])
-  --       --        <*> mkEq s s'
-  --       --        <*> mkEq true true
-  --       -- )))
-
-
-  -- forM_ ms $ \m -> do
-  --   let ns = map snd $ filter (\(m', n) -> m' == m) tPairs
-  --   assert =<< consistentSensitivity ns (Sens_T m)
-
-
-  -- let ms = Set.toList (Set.fromList (map fst tPairs))
-
-  -- forM_ ms $ \m -> do
-  --   let ns = map snd $ filter (\(m', n) -> m' == m) tPairs
-  --   consistentSensitivity ns (Sens_T m)
-
-    -- assert =<< mkExists [] [v_sym] [var_sort]
-    --   =<< join (mkImplies 
-        -- (mkIte <$> (mkExists [] [s_sym] [sens_sort]
-        --              =<< (z3M mkAnd [mkEq s_var secret, applySetRelation (Atom_S' m n) [v_var, s_var]]))
-
-        -- (mkIte <$> (applySetRelation (Atom_S' m n) [v_var, secret])
-        --        <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure secret)
-        --        <*> join (mkEq <$> (mkApp sens_t [n_z3]) <*> pure public)
-        -- )
-
 notCorrectnessCondition :: [NodeId] -> Z3Converter ()
 notCorrectnessCondition nodeIds = do
-  -- (node_sort, n_sym, n) <- mkSymVar "n" Node_Sort
-
-  track <- mkFreshBoolVar "track"
-  {- trackingAssert track -}
-  assert =<< consistentSensitivity nodeIds C_Exit'
-
-  -- true <- mkTrue
-
-  -- secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
-  -- public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
-
-  -- forM_ nodeIds $ \n -> do
-  --   (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
-  --   (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
-  --   (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
-
-
-
-  --   trackingAssert track =<< -- mkNot =<<
-  --     mkForallConst [] [v_sym, s_sym, s'_sym]
-  --       =<< join
-  --         (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (C_Exit' n) [v, s] <*> pure true)
-  --                               ,join (mkEq <$> applySetRelation (C_Exit' n) [v, s'] <*> pure true)])
-  --                <*> mkEq s s'
-  --                <*> mkEq true true
-  --         )
-
--- maybeMap :: (a -> b)
-
+  trackingAssert =<< consistentSensitivity nodeIds C_Exit'
 
 evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
@@ -419,15 +326,6 @@ class Z3SetRelation a where
   applySetRelationM :: a -> [Z3Converter AST] -> Z3Converter AST
   applySetRelationM sr xs = applySetRelation sr =<< sequence xs
 
--- instance Z3SetRelation SensExpr where
---   applySetRelation s@(Sens_T x y) [sens] = do
---     z3_s <- lookupZ3FuncDecl s
---     y' <- toZ3 y
---     join $ mkEq <$> (mkApp z3_s [y']) <*> pure sens
---     -- mkApp z3_t (y':args)
-
---   applySetRelation _ _ = error "applySetRelation: unsupported SensExpr"
-
 instance Z3SetRelation (SetFamily a) where
   applySetRelation sr = applyFamilyFnM sr . map pure
   applySetRelationM = applyFamilyFnM
@@ -476,16 +374,10 @@ mkSymVar name z3sort = do
   modify succ
 
   sort <- lookupZ3Sort z3sort
-  -- sym <- mkStringSymbol (name ++ "__" ++ show uniq)
 
   var <- mkFreshVar name sort
   app <- toApp var
   return (sort, app, var)
-
--- mkFreshVarWith :: Z3Sort -> Z3Converter (Sort, Symbol, AST)
--- mkFreshVarWith z3sort = do
---   sort <- lookupZ3Sort z3sort
-
 
 instance ToZ3 NodeId where
   toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
@@ -529,34 +421,14 @@ instance ToZ3 SetConstraint where
     forallQuantifyFreeVars lhs $ \vars ->
       join (mkEq <$> applySetRelation lhs vars <*> applySetRelation x vars)
 
-    -- (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    -- (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-
-    -- mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-    --   =<< join (mkEq <$> applyFamilyFnM lhs [pure v_var, pure s_var] <*> applyFamilyFnM x [pure v_var, pure s_var])
-
   toZ3 (_ :=: SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
 
   toZ3 (lhs :=: SE_Union x y) =
     forallQuantifyFreeVars lhs $ \vars -> do
       the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
       join (mkEq <$> applySetRelation lhs vars <*> pure the_or)
-    -- (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    -- (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-    -- let vs = [v_var, s_var]
-
-    -- the_or <- z3M mkOr [applySetRelation x vs, applySetRelation y vs]
-
-    -- mkForall [] [v_sym, s_sym] [ varSort, sensSort ]
-    --   =<< join (mkEq <$> applySetRelation lhs vs <*> pure the_or)
 
   toZ3 (lhs :=: SE_UnionSingle x v0 s0) = do
-    -- forallQuantifyFreeVars lhs $ \vars -> do
-    --   z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
-    --                      ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
-    --                                 ,join (mkEq s_var <$> toZ3 s0)
-    --                                 ]
-    --                      ]
 
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
@@ -566,13 +438,6 @@ instance ToZ3 SetConstraint where
       =<< join (mkIte <$> z3M mkAnd [join (mkEq v_var <$> toZ3 v0), join (mkEq s_var <$> toZ3 s0)]
                       <*> join (mkEq <$> applySetRelation lhs vs <*> mkTrue)
                       <*> join (mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs))
-      -- =<< (z3M mkOr [join $ mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs
-      --                    ,z3M mkAnd [join (mkEq v_var <$> toZ3 v0)
-      --                               ,join (mkEq s_var <$> toZ3 s0)
-      --                               ,applySetRelation lhs vs
-      --                               ]
-      --                    ])
-
 
   toZ3 (lhs :=: SE_IfThenElse (sensX, sensY) t f) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
