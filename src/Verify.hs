@@ -552,7 +552,7 @@ main = do
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
               theNodeIds = getNodeIds constraints
 
-          -- putStrLn $ ppr constraints
+          putStrLn $ ppr constraints
 
           -- putStrLn (nodeIdLocInfo nodeLocs)
 
