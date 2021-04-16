@@ -60,6 +60,21 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
 
 void ConstraintGenerator::handle(const BinaryOperator* b) {
   if (!b) return;
+
+  if (b->isAssignmentOp()) {
+    auto lhs = b->getLHS();
+
+    if (DeclRefExpr::classof(lhs)) {
+      auto n = node(b);
+      auto m = node(b->getRHS());
+
+      auto v = var(static_cast<const DeclRefExpr*>(lhs)->getFoundDecl());
+
+      pushConstraint(new C_Exit(n), new SetIfThenElse(new PairIn(v, PUBLIC, new C_Entry(n)),
+                                                      new SetUnionPair(new C_Entry(n), v, new SensT(m)),
+                                                      new C_Entry(n)));
+    }
+  }
 }
 
 void ConstraintGenerator::handle(const IfStmt* stmt) {
@@ -92,15 +107,19 @@ void ConstraintGenerator::handle(const DeclStmt* d) {
 void ConstraintGenerator::handle(const VarDecl* d) {
   auto n = node(d);
   auto v = var(d);
+  LangOptions langOpts;
+
 
   for (auto it = d->getAttrs().begin(); it != d->getAttrs().end(); ++it) {
-    if (string((*it)->getSpelling()) == "nospec") {
-      pushConstraint(new C_Exit(n), new SetUnionPair(new C_Entry(n), v, SECRET));
+    string attr = Lexer::getSourceText(CharSourceRange::getTokenRange((*it)->getRange()), d->getASTContext().getSourceManager(), langOpts).str();
+
+    if (attr == "annotate(\"nospec\")") {
+      pushConstraint(new C_Exit(n), new SetUnionPair(new C_Entry(n), v, new SensAtom(SECRET)));
       return;
     }
   }
 
-  pushConstraint(new C_Exit(n), new SetUnionPair(new C_Entry(n), v, PUBLIC));
+  pushConstraint(new C_Exit(n), new SetUnionPair(new C_Entry(n), v, new SensAtom(PUBLIC)));
 }
 
 ConstraintGenerator::ConstraintGenerator() {
@@ -133,7 +152,6 @@ int main(int argc, const char **argv) {
   ClangTool tool(optionsParser.getCompilations(),
                  optionsParser.getSourcePathList());
 
-  llvm::errs() << "plugin output\n";
   ConstraintGenerator gen;
 
   auto matcher = ast_matchers::functionDecl().bind("functionDecl");

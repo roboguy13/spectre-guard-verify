@@ -17,10 +17,8 @@ bool operator<(const NodeId x, const NodeId y) { return x.id < y.id; }
 bool operator==(const VarId x, const VarId y) { return x.id == y.id; }
 bool operator<(const VarId x, const VarId y) { return x.id < y.id; }
 
-//
-// NodeIdGenerator
-//
-
+string NodeId::ppr() const { return "n" + std::to_string(id); }
+string VarId::ppr() const { return std::to_string(id); }
 
 //
 // EmptySet //
@@ -73,7 +71,7 @@ NodeId SensT::getArg() const { return node; }
 
 
 string SensT::ppr() const {
-  return "T(" + std::to_string(node.id) + ")";
+  return "T(" + node.ppr() + ")";
 }
 
 void SensT::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
@@ -86,7 +84,7 @@ C_Entry::C_Entry(NodeId arg) : arg(arg) { }
 
 NodeId C_Entry::getArg() const { return arg; }
 
-string C_Entry::ppr() const { return "C_entry(" + std::to_string(arg.id) + ")"; }
+string C_Entry::ppr() const { return "C_entry(" + arg.ppr() + ")"; }
 void C_Entry::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
@@ -97,7 +95,7 @@ C_Exit::C_Exit(NodeId arg) : arg(arg) { }
 
 NodeId C_Exit::getArg() const { return arg; }
 
-string C_Exit::ppr() const { return "C_exit(" + std::to_string(arg.id) + ")"; }
+string C_Exit::ppr() const { return "C_exit(" + arg.ppr() + ")"; }
 void C_Exit::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
@@ -109,7 +107,7 @@ S_Family::S_Family(NodeId first, NodeId second) : first(first), second(second) {
 NodeId S_Family::getFirst() const { return first; }
 NodeId S_Family::getSecond() const { return second; }
 
-string S_Family::ppr() const { return "S(" + std::to_string(first.id) + ", " + std::to_string(second.id) + ")"; }
+string S_Family::ppr() const { return "S(" + first.ppr() + ", " + second.ppr() + ")"; }
 void S_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
@@ -120,7 +118,7 @@ E_Family::E_Family(NodeId arg) : arg(arg) { }
 
 NodeId E_Family::getArg() const { return arg; }
 
-string E_Family::ppr() const { return "E(" + std::to_string(arg.id) + ")"; }
+string E_Family::ppr() const { return "E(" + arg.ppr() + ")"; }
 
 void E_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
@@ -145,13 +143,13 @@ void SetUnion::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 //
 
 
-SetUnionPair::SetUnionPair(SetExpr* lhs, VarId var, Sensitivity sens) : lhs(lhs), var(var), sens(sens) { }
+SetUnionPair::SetUnionPair(SetExpr* lhs, VarId var, SensExpr* sens) : lhs(lhs), var(var), sens(sens) { }
 
 SetExpr* SetUnionPair::getLHS() const { return lhs; }
 VarId SetUnionPair::getVar() const { return var; }
-Sensitivity SetUnionPair::getSens() const { return sens; }
+SensExpr* SetUnionPair::getSens() const { return sens; }
 
-std::string SetUnionPair::ppr() const { return lhs->ppr() + " U {(" + std::to_string(var.id) + ", " + SensAtom(sens).ppr() + ")}"; }
+std::string SetUnionPair::ppr() const { return lhs->ppr() + " U {(" + var.ppr() + ", " + sens->ppr() + ")}"; }
 void SetUnionPair::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
@@ -172,11 +170,10 @@ void SensEqual::accept(ConditionVisitor& visitor) const { visitor.visit(*this); 
 
 PairIn::PairIn(VarId var, Sensitivity sens, SetExpr* expr) : var(var), sens(sens), expr(expr) { }
 
-VarId PairIn::getVar() const { return var; }
-Sensitivity PairIn::getSens() const { return sens; }
+VarId PairIn::getVar() const { return var; } Sensitivity PairIn::getSens() const { return sens; }
 SetExpr* PairIn::getExpr() const { return expr; }
 
-string PairIn::ppr() const { return "(" + std::to_string(var.id) + ", " + SensAtom(sens).ppr() + ") in " + expr->ppr(); }
+string PairIn::ppr() const { return "(" + var.ppr() + ", " + SensAtom(sens).ppr() + ") in " + expr->ppr(); }
 void PairIn::accept(ConditionVisitor& visitor) const { visitor.visit(*this); }
 
 //

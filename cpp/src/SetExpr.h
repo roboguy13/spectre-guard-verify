@@ -31,11 +31,15 @@ struct NodeId
 {
   clang::SourceLocation srcLoc;
   int id;
+
+  std::string ppr() const;
 };
 
 struct VarId {
   clang::SourceLocation srcLoc;
   int id;
+
+  std::string ppr() const;
 };
 
 bool operator==(const NodeId x, const NodeId y);
@@ -205,13 +209,13 @@ class SetUnionPair : public SetExpr
 {
   SetExpr* lhs;
   VarId var;
-  Sensitivity sens;
+  SensExpr* sens;
 public:
-  SetUnionPair(SetExpr*, VarId, Sensitivity);
+  SetUnionPair(SetExpr*, VarId, SensExpr*);
 
   SetExpr* getLHS() const;
   VarId getVar() const;
-  Sensitivity getSens() const;
+  SensExpr* getSens() const;
 
   std::string ppr() const;
   void accept(SetExprVisitor& visitor) const;
@@ -324,6 +328,9 @@ T IdGenerator<T>::getIdByUniq(int id) {
   }
 
   std::cerr << "getIdByUniq: cannot find uniq" << std::endl;
+  NodeId n;
+  n.id = -1;
+  return n;
 }
 
 #endif
