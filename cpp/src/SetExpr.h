@@ -2,7 +2,11 @@
 #define SET_EXPR_H
 
 #include <set>
+#include <vector>
 #include <string>
+#include <map>
+
+#include <clang-c/Index.h>
 
 enum Sensitivity
 {
@@ -12,6 +16,7 @@ enum Sensitivity
 
 struct NodeId
 {
+  CXCursor cursor;
   int id;
 };
 
@@ -25,6 +30,15 @@ bool operator<(const NodeId x, const NodeId y);
 bool operator==(const VarId x, const VarId y);
 bool operator<(const VarId x, const VarId y);
 
+class NodeIdGenerator
+{
+  int uniq;
+  std::map<int, NodeId> nodeIds;
+public:
+  NodeIdGenerator();
+
+  NodeId getNodeId(CXCursor);
+};
 
 class SetExprVisitor;
 
@@ -59,6 +73,8 @@ public:
 
   std::string ppr() const;
 };
+
+typedef std::vector<SetConstraint*> SetConstraints;
 
 class SensExpr : public SetExpr
 {

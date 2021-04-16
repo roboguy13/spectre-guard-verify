@@ -17,6 +17,29 @@ bool operator==(const VarId x, const VarId y) { return x.id == y.id; }
 bool operator<(const VarId x, const VarId y) { return x.id < y.id; }
 
 //
+// NodeIdGenerator
+//
+
+NodeIdGenerator::NodeIdGenerator() : uniq(0) { }
+
+NodeId NodeIdGenerator::getNodeId(CXCursor cur) {
+  auto it = nodeIds.find(cur.xdata);
+  NodeId nodeId;
+
+  if (it == nodeIds.end()) {
+    nodeId.cursor = cur;
+    nodeId.id = uniq;
+
+    nodeIds[uniq] = nodeId;
+    ++uniq;
+  } else {
+    nodeId = it->second;
+  }
+
+  return nodeId;
+}
+
+//
 // EmptySet //
 //
 
