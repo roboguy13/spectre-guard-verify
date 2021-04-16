@@ -69,13 +69,13 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
         auto s = context.constant("s", sensSort);
 
         Z3SetExprVisitor visitorLHS(*this, trueExpr, v, s);
+        c.getLHS()->accept(visitorLHS);
 
         if (c.getRHS()->isEmptySet()) {
-          return !(z3::forall(v, s, visitorLHS.getExpr()));
+          return z3::forall(v, s, !visitorLHS.getExpr());
         } else {
           Z3SetExprVisitor visitorRHS(*this, trueExpr, v, s);
 
-          c.getLHS()->accept(visitorLHS);
           c.getRHS()->accept(visitorRHS);
 
           return z3::forall(v, s, visitorLHS.getExpr() == visitorRHS.getExpr());
