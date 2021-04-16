@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <iostream>
 
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CommonOptionsParser.h"
@@ -321,6 +322,8 @@ T IdGenerator<T>::getIdByUniq(int id) {
       return it->second;
     }
   }
+
+  std::cerr << "getIdByUniq: cannot find uniq" << std::endl;
 }
 
 #endif

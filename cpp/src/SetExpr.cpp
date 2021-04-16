@@ -151,7 +151,7 @@ SetExpr* SetUnionPair::getLHS() const { return lhs; }
 VarId SetUnionPair::getVar() const { return var; }
 Sensitivity SetUnionPair::getSens() const { return sens; }
 
-std::string SetUnionPair::ppr() const { return lhs->ppr() + " U {(" + std::to_string(var.id) + ", " + SensAtom(sens).ppr() + "(}"; }
+std::string SetUnionPair::ppr() const { return lhs->ppr() + " U {(" + std::to_string(var.id) + ", " + SensAtom(sens).ppr() + ")}"; }
 void SetUnionPair::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
