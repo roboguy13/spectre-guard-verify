@@ -40,6 +40,14 @@ NodeId NodeIdGenerator::getNodeId(SourceLocation srcLoc) {
   return nodeId;
 }
 
+NodeId NodeIdGenerator::getNodeIdByUniq(int id) {
+  for (auto it = nodeIds.begin(); it != nodeIds.end(); ++it) {
+    if (it->second.id == id) {
+      return it->second;
+    }
+  }
+}
+
 //
 // EmptySet //
 //

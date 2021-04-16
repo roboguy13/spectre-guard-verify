@@ -50,6 +50,7 @@ public:
   NodeIdGenerator();
 
   NodeId getNodeId(clang::SourceLocation);
+  NodeId getNodeIdByUniq(int id);
 };
 
 class SetExprVisitor;

@@ -63,18 +63,27 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
   if (!cs) return;
 
   if (const Stmt* last = *(cs->body_begin())) {
+    handle(last);
     for (auto it = cs->body_begin()+1; it != cs->body_end(); ++it) {
-      pushConstraint(new C_Entry(node(last)), new C_Exit(node(*it)));
+      pushConstraint(new C_Entry(node(*it)), new C_Exit(node(last)));
       handle(*it);
       last = *it;
     }
   }
 }
 
+ConstraintGenerator::ConstraintGenerator() {
+}
+
 void ConstraintGenerator::run(const clang::ast_matchers::MatchFinder::MatchResult &result) {
   if (const FunctionDecl* f = result.Nodes.getNodeAs<FunctionDecl>("functionDecl")) {
     handle(f->getBody());
   }
+}
+
+void ConstraintGenerator::finalizeConstraints() {
+  auto n = nodeIdGen.getNodeIdByUniq(0);
+  pushConstraint(new C_Entry(n), new EmptySet());
 }
 
 SetConstraints ConstraintGenerator::getConstraints() const { return constraints; }
@@ -103,6 +112,7 @@ int main(int argc, const char **argv) {
 
 
   int r = tool.run(newFrontendActionFactory(&finder).get());
+  gen.finalizeConstraints();
 
   llvm::errs() << pprSetConstraints(gen.getConstraints());
 
