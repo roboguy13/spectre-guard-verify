@@ -6,7 +6,9 @@
 #include <string>
 #include <map>
 
-#include <clang-c/Index.h>
+#include "clang/Frontend/FrontendActions.h"
+#include "clang/Tooling/CommonOptionsParser.h"
+#include "clang/Tooling/Tooling.h"
 
 enum Sensitivity
 {
@@ -14,9 +16,19 @@ enum Sensitivity
   SECRET
 };
 
+enum SetExprAtomKind
+{
+  SINGLE_VAR,
+  SF_BASE,
+  SF_C_ENTRY,
+  SF_C_EXIT,
+  SF_S,
+  SF_E
+};
+
 struct NodeId
 {
-  CXCursor cursor;
+  clang::SourceLocation srcLoc;
   int id;
 };
 
@@ -33,11 +45,11 @@ bool operator<(const VarId x, const VarId y);
 class NodeIdGenerator
 {
   int uniq;
-  std::map<int, NodeId> nodeIds;
+  std::map<clang::SourceLocation, NodeId> nodeIds;
 public:
   NodeIdGenerator();
 
-  NodeId getNodeId(CXCursor);
+  NodeId getNodeId(clang::SourceLocation);
 };
 
 class SetExprVisitor;
@@ -45,15 +57,83 @@ class SetExprVisitor;
 class SetExpr
 {
 public:
-  virtual std::set<NodeId> getNodeIds() const=0;
   virtual std::string ppr() const=0;
 
   virtual void accept(SetExprVisitor& visitor) const=0;
 };
 
+class SetExprAtom : public SetExpr
+{
+public:
+  const SetExprAtomKind kind = SF_BASE;
+};
+
+class C_Entry : public SetExprAtom
+{
+  NodeId arg;
+public:
+  const SetExprAtomKind kind = SF_C_ENTRY;
+
+  C_Entry(NodeId arg);
+
+  NodeId getArg() const;
+
+  std::string ppr() const;
+
+  void accept(SetExprVisitor& visitor) const;
+};
+
+class C_Exit : public SetExprAtom
+{
+  NodeId arg;
+public:
+  const SetExprAtomKind kind = SF_C_ENTRY;
+
+  C_Exit(NodeId arg);
+
+  NodeId getArg() const;
+
+  std::string ppr() const;
+
+  void accept(SetExprVisitor& visitor) const;
+};
+
+class S_Family : public SetExprAtom
+{
+  NodeId first, second;
+public:
+  const SetExprAtomKind kind = SF_S;
+
+  S_Family(NodeId, NodeId);
+
+  NodeId getFirst() const;
+  NodeId getSecond() const;
+
+  std::string ppr() const;
+
+  void accept(SetExprVisitor& visitor) const;
+};
+
+class E_Family : public SetExprAtom
+{
+  NodeId arg;
+public:
+  const SetExprAtomKind kind = SF_E;
+
+  E_Family(NodeId);
+
+  NodeId getArg() const;
+
+  std::string ppr() const;
+
+  void accept(SetExprVisitor& visitor) const;
+};
+
+
+
 class EmptySet : public SetExpr
 {
-  std::set<NodeId> getNodeIds() const;
+public:
   std::string ppr() const;
 
   void accept(SetExprVisitor& visitor) const;
@@ -68,8 +148,6 @@ public:
 
   SetExpr* getLHS() const;
   SetExpr* getRHS() const;
-
-  std::set<NodeId> getNodeIds() const;
 
   std::string ppr() const;
 };
@@ -86,7 +164,6 @@ class SensAtom : public SensExpr
 public:
   SensAtom(Sensitivity sens);
 
-  std::set<NodeId> getNodeIds() const;
   Sensitivity getSens() const;
 
   std::string ppr() const;
@@ -100,7 +177,6 @@ public:
   SensT(NodeId node);
 
   NodeId getArg() const;
-  std::set<NodeId> getNodeIds() const;
 
   std::string ppr() const;
   void accept(SetExprVisitor& visitor) const;
@@ -115,8 +191,6 @@ public:
 
   SetExpr* getLHS() const;
   SetExpr* getRHS() const;
-
-  std::set<NodeId> getNodeIds() const;
 
   std::string ppr() const;
   void accept(SetExprVisitor& visitor) const;
@@ -201,6 +275,11 @@ struct SetExprVisitor
   virtual void visit(const SetUnion&)=0;
   virtual void visit(const SetUnionPair&)=0;
   virtual void visit(const SetIfThenElse&)=0;
+
+  virtual void visit(const C_Entry&)=0;
+  virtual void visit(const C_Exit&)=0;
+  virtual void visit(const S_Family&)=0;
+  virtual void visit(const E_Family&)=0;
 };
 
 struct ConditionVisitor

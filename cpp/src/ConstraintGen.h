@@ -5,20 +5,28 @@
 
 #include <string>
 
-class ConstraintGenerator
+#include "clang/Frontend/FrontendActions.h"
+#include "clang/Tooling/CommonOptionsParser.h"
+#include "clang/Tooling/Tooling.h"
+
+#include "clang/ASTMatchers/ASTMatchers.h"
+#include "clang/ASTMatchers/ASTMatchFinder.h"
+
+class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallback
 {
   SetConstraints constraints;
-  NodeIdGenerator nIdGen;
+  NodeIdGenerator nodeIdGen;
 
+  void pushConstraint(SetExpr*, SetExpr*);
 
-  static CXChildVisitResult cursorVisitor(CXCursor cursor, CXCursor parent, CXClientData clientData);
-  static CXChildVisitResult funcDeclVisitor(CXCursor cursor, CXCursor parent, CXClientData clientData);
-  static CXChildVisitResult compoundStmtVisitor(CXCursor cursor, CXCursor parent, CXClientData clientData);
-  static CXChildVisitResult varDeclVisitor(CXCursor cursor, CXCursor parent, CXClientData clientData);
-  static CXChildVisitResult binaryOpVisitor(CXCursor cursor, CXCursor parent, CXClientData clientData);
+  template<typename T>
+  NodeId node(const T* t);
 
+  void handle(const clang::IfStmt* stmt);
+  void handle(const clang::Stmt* stmt);
+  void handle(const clang::CompoundStmt* cs);
 public:
-  SetConstraints genConstraintsForFile(std::string fileName);
+  void run(const clang::ast_matchers::MatchFinder::MatchResult &Result);
 };
 
 #endif

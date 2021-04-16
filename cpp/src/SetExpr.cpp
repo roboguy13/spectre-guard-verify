@@ -9,6 +9,7 @@
 using std::set;
 using std::string;
 using std::cerr;
+using namespace clang;
 
 bool operator==(const NodeId x, const NodeId y) { return x.id == y.id; }
 bool operator<(const NodeId x, const NodeId y) { return x.id < y.id; }
@@ -22,15 +23,15 @@ bool operator<(const VarId x, const VarId y) { return x.id < y.id; }
 
 NodeIdGenerator::NodeIdGenerator() : uniq(0) { }
 
-NodeId NodeIdGenerator::getNodeId(CXCursor cur) {
-  auto it = nodeIds.find(cur.xdata);
+NodeId NodeIdGenerator::getNodeId(SourceLocation srcLoc) {
+  auto it = nodeIds.find(srcLoc);
   NodeId nodeId;
 
   if (it == nodeIds.end()) {
-    nodeId.cursor = cur;
+    nodeId.srcLoc = srcLoc;
     nodeId.id = uniq;
 
-    nodeIds[uniq] = nodeId;
+    nodeIds[srcLoc] = nodeId;
     ++uniq;
   } else {
     nodeId = it->second;
@@ -43,7 +44,6 @@ NodeId NodeIdGenerator::getNodeId(CXCursor cur) {
 // EmptySet //
 //
 
-set<NodeId> EmptySet::getNodeIds() const { return set<NodeId>(); }
 string EmptySet::ppr() const { return "{}"; }
 void EmptySet::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
@@ -56,14 +56,6 @@ SetConstraint::SetConstraint(SetExpr* lhs, SetExpr* rhs) : lhs(lhs), rhs(rhs) { 
 SetExpr* SetConstraint::getLHS() const { return lhs; }
 SetExpr* SetConstraint::getRHS() const { return rhs; }
 
-set<NodeId> SetConstraint::getNodeIds() const {
-  set<NodeId> r(lhs->getNodeIds());
-
-  r.insert(rhs->getNodeIds().begin(), rhs->getNodeIds().end());
-
-  return r;
-}
-
 string SetConstraint::ppr() const {
   return lhs->ppr() + " = " + rhs->ppr();
 }
@@ -74,8 +66,6 @@ string SetConstraint::ppr() const {
 //
 
 SensAtom::SensAtom(Sensitivity sens) : sens(sens) { }
-
-set<NodeId> SensAtom::getNodeIds() const { return set<NodeId>(); }
 
 string SensAtom::ppr() const {
   switch (sens) {
@@ -99,13 +89,58 @@ SensT::SensT(NodeId node) : node(node) { }
 
 NodeId SensT::getArg() const { return node; }
 
-set<NodeId> SensT::getNodeIds() const { return set<NodeId>({node}); }
 
 string SensT::ppr() const {
   return "T(" + std::to_string(node.id) + ")";
 }
 
 void SensT::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+//
+// C_Entry
+//
+
+C_Entry::C_Entry(NodeId arg) : arg(arg) { }
+
+NodeId C_Entry::getArg() const { return arg; }
+
+string C_Entry::ppr() const { return "C_entry(" + std::to_string(arg.id) + ")"; }
+void C_Entry::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+//
+// C_Exit
+//
+
+C_Exit::C_Exit(NodeId arg) : arg(arg) { }
+
+NodeId C_Exit::getArg() const { return arg; }
+
+string C_Exit::ppr() const { return "C_exit(" + std::to_string(arg.id) + ")"; }
+void C_Exit::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+//
+// S_Family
+//
+
+S_Family::S_Family(NodeId first, NodeId second) : first(first), second(second) { }
+
+NodeId S_Family::getFirst() const { return first; }
+NodeId S_Family::getSecond() const { return second; }
+
+string S_Family::ppr() const { return "S(" + std::to_string(first.id) + ", " + std::to_string(second.id) + ")"; }
+void S_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+//
+// E_Family
+//
+
+E_Family::E_Family(NodeId arg) : arg(arg) { }
+
+NodeId E_Family::getArg() const { return arg; }
+
+string E_Family::ppr() const { return "E(" + std::to_string(arg.id) + ")"; }
+
+void E_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
 //
 // SetUnion //
@@ -115,14 +150,6 @@ SetUnion::SetUnion(SetExpr* lhs, SetExpr* rhs) : lhs(lhs), rhs(rhs) { }
 
 SetExpr* SetUnion::getLHS() const { return lhs; }
 SetExpr* SetUnion::getRHS() const { return rhs; }
-
-set<NodeId> SetUnion::getNodeIds() const {
-  set<NodeId> r(lhs->getNodeIds());
-
-  r.insert(rhs->getNodeIds().begin(), rhs->getNodeIds().end());
-
-  return r;
-}
 
 string SetUnion::ppr() const {
   return lhs->ppr() + " U " + rhs->ppr();
