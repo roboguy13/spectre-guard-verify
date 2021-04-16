@@ -64,7 +64,7 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
 
   if (const Stmt* last = *(cs->body_begin())) {
     for (auto it = cs->body_begin()+1; it != cs->body_end(); ++it) {
-      pushConstraint(new C_Entry(node(*it)), new C_Exit(node(last)));
+      pushConstraint(new C_Entry(node(last)), new C_Exit(node(*it)));
       handle(*it);
       last = *it;
     }
