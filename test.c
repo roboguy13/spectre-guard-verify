@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 int test() {
   int y __attribute__((nospec));
   int z;

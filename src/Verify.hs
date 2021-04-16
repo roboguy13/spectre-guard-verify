@@ -21,6 +21,10 @@ import           Language.C.System.Preprocess
 import           Language.C.System.GCC
 import           Language.C.Data.Ident
 
+import           System.FilePath.Posix
+import           System.Cmd
+import           System.Process
+
 import           Z3.Monad
 
 import           Control.Monad.State
@@ -33,6 +37,8 @@ import           Data.Bifunctor
 import           Data.Typeable
 import           Data.Proxy
 import           Data.Kind
+
+import           Data.Maybe (maybeToList)
 
 import qualified Data.List as L
 import qualified Data.Set as Set
@@ -523,6 +529,33 @@ nodeIdLocInfo = unlines . map go
 getAnns :: CTranslationUnit a -> [a]
 getAnns = foldMap (:[])
 
+data GCC_NoIncludes = GCC_NoIncludes FilePath
+
+instance Preprocessor GCC_NoIncludes where
+  parseCPPArgs (GCC_NoIncludes path) = parseCPPArgs (newGCC path)
+  runCPP (GCC_NoIncludes path) cpp_args = do
+    let tempFile = replaceExtension (inputFile cpp_args) "i-sed"
+
+    (_, Just h1, _, p1) <- createProcess (proc "sed" ["/^#include/d", inputFile cpp_args]) { std_out = CreatePipe }
+    (_, _, _, p2)       <- createProcess (proc path (buildCppArgs' cpp_args ++ ["-E", "-"])) { std_in = UseHandle h1 }
+
+    waitForProcess p1
+    waitForProcess p2
+
+-- Adapted from Language.C.System.GCC to avoid using the input file (so
+-- that stdin is used instead)
+buildCppArgs' :: CppArgs -> [String]
+buildCppArgs' (CppArgs options extra_args _tmpdir _input_file output_file_opt) =
+       (concatMap tOption options)
+    ++ outputFileOpt
+    ++ extra_args
+    where
+    tOption (IncludeDir incl)  = ["-I",incl]
+    tOption (Define key value) = [ "-D" ++ key ++ (if null value then "" else "=" ++ value) ]
+    tOption (Undefine key)     = [ "-U" ++ key ]
+    tOption (IncludeFile f)    = [ "-include", f]
+    outputFileOpt = concat [ ["-o",output_file] | output_file <- maybeToList output_file_opt ]
+
 gccPath :: FilePath
 gccPath = "/usr/bin/gcc"
 
@@ -530,11 +563,11 @@ main :: IO ()
 main = do
   let fileName = "../test.c"
 
-  let gcc = newGCC gccPath
+  let gcc = GCC_NoIncludes gccPath
 
   stream_either <- runPreprocessor gcc $ CppArgs
     { cppOptions = []
-    , extraOptions = []
+    , extraOptions = ["-nostdinc"]
     , cppTmpDir = Nothing
     , inputFile = fileName
     , outputFile = Nothing
