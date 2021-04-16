@@ -21,32 +21,6 @@ bool operator<(const VarId x, const VarId y) { return x.id < y.id; }
 // NodeIdGenerator
 //
 
-NodeIdGenerator::NodeIdGenerator() : uniq(0) { }
-
-NodeId NodeIdGenerator::getNodeId(SourceLocation srcLoc) {
-  auto it = nodeIds.find(srcLoc);
-  NodeId nodeId;
-
-  if (it == nodeIds.end()) {
-    nodeId.srcLoc = srcLoc;
-    nodeId.id = uniq;
-
-    nodeIds[srcLoc] = nodeId;
-    ++uniq;
-  } else {
-    nodeId = it->second;
-  }
-
-  return nodeId;
-}
-
-NodeId NodeIdGenerator::getNodeIdByUniq(int id) {
-  for (auto it = nodeIds.begin(); it != nodeIds.end(); ++it) {
-    if (it->second.id == id) {
-      return it->second;
-    }
-  }
-}
 
 //
 // EmptySet //

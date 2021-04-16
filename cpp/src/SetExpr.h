@@ -33,6 +33,7 @@ struct NodeId
 };
 
 struct VarId {
+  clang::SourceLocation srcLoc;
   int id;
 };
 
@@ -42,15 +43,16 @@ bool operator<(const NodeId x, const NodeId y);
 bool operator==(const VarId x, const VarId y);
 bool operator<(const VarId x, const VarId y);
 
-class NodeIdGenerator
+template<typename T>
+class IdGenerator
 {
   int uniq;
-  std::map<clang::SourceLocation, NodeId> nodeIds;
+  std::map<clang::SourceLocation, T> ids;
 public:
-  NodeIdGenerator();
+  IdGenerator();
 
-  NodeId getNodeId(clang::SourceLocation);
-  NodeId getNodeIdByUniq(int id);
+  T getId(clang::SourceLocation);
+  T getIdByUniq(int id);
 };
 
 class SetExprVisitor;
@@ -290,6 +292,36 @@ struct ConditionVisitor
 };
 
 std::string pprSetConstraints(SetConstraints cs);
+
+template<typename T>
+IdGenerator<T>::IdGenerator() : uniq(0) { }
+
+template<typename T>
+T IdGenerator<T>::getId(clang::SourceLocation srcLoc) {
+  auto it = ids.find(srcLoc);
+  T id;
+
+  if (it == ids.end()) {
+    id.srcLoc = srcLoc;
+    id.id = uniq;
+
+    ids[srcLoc] = id;
+    ++uniq;
+  } else {
+    id = it->second;
+  }
+
+  return id;
+}
+
+template<typename T>
+T IdGenerator<T>::getIdByUniq(int id) {
+  for (auto it = ids.begin(); it != ids.end(); ++it) {
+    if (it->second.id == id) {
+      return it->second;
+    }
+  }
+}
 
 #endif
 
