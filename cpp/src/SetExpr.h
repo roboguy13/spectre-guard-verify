@@ -288,5 +288,7 @@ struct ConditionVisitor
   virtual void visit(const PairIn&)=0;
 };
 
+std::string pprSetConstraints(SetConstraints cs);
+
 #endif
 

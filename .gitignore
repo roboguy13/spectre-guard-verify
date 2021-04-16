@@ -6,3 +6,4 @@ src/CMakeFiles
 *.o
 *.so
 a.out
+*.dylib

@@ -210,3 +210,11 @@ SetExpr* SetIfThenElse::getElse() const { return elseBranch; }
 string SetIfThenElse::ppr() const { return "if " + cond->ppr() + " then " + thenBranch->ppr() + " else " + elseBranch->ppr(); }
 void SetIfThenElse::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
+string pprSetConstraints(SetConstraints cs) {
+  string r = "";
+  for (auto it = cs.begin(); it != cs.end(); ++it) {
+    r += (*it)->ppr() + "\n";
+  }
+  return r;
+}
+

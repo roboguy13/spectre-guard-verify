@@ -25,8 +25,11 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   void handle(const clang::IfStmt* stmt);
   void handle(const clang::Stmt* stmt);
   void handle(const clang::CompoundStmt* cs);
+  void handle(const clang::BinaryOperator* b);
 public:
   void run(const clang::ast_matchers::MatchFinder::MatchResult &Result);
+
+  SetConstraints getConstraints() const;
 };
 
 #endif

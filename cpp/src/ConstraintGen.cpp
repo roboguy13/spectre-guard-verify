@@ -17,6 +17,7 @@
 #include <string>
 #include <iostream>
 
+using std::cout;
 using std::cerr;
 using std::endl;
 using std::string;
@@ -39,11 +40,17 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
     handle(static_cast<const CompoundStmt*>(stmt));
   } else if (IfStmt::classof(stmt)) {
     handle(static_cast<const IfStmt*>(stmt));
+  } else if (BinaryOperator::classof(stmt)) {
+    handle(static_cast<const BinaryOperator*>(stmt));
   } else {
     NodeId n = node(stmt);
 
     pushConstraint(new C_Exit(n), new C_Entry(n));
   }
+}
+
+void ConstraintGenerator::handle(const BinaryOperator* b) {
+  
 }
 
 void ConstraintGenerator::handle(const IfStmt* stmt) {
@@ -62,13 +69,16 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
 
 void ConstraintGenerator::run(const clang::ast_matchers::MatchFinder::MatchResult &result) {
   if (const CompoundStmt* cs = result.Nodes.getNodeAs<CompoundStmt>("compoundStmt")) {
+    llvm::errs() << "found compount stmt\n";
     handle(cs);
   }
 }
 
+SetConstraints ConstraintGenerator::getConstraints() const { return constraints; }
+
 // Apply a custom category to all command-line options so that they are the
 // only ones displayed.
-static llvm::cl::OptionCategory MyToolCategory("my-tool options");
+static llvm::cl::OptionCategory MyToolCategory("sg-analyze options");
 
 // CommonOptionsParser declares HelpMessage with a description of the common
 // command-line options related to the compilation database and input files.
@@ -88,7 +98,22 @@ int main(int argc, const char **argv) {
   CommonOptionsParser& OptionsParser = ExpectedParser.get();
   ClangTool Tool(OptionsParser.getCompilations(),
                  OptionsParser.getSourcePathList());
-  return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get());
+
+  llvm::errs() << "plugin output\n";
+  ConstraintGenerator gen;
+
+  auto matcher = ast_matchers::functionDecl();
+  ast_matchers::MatchFinder finder;
+
+  finder.addMatcher(matcher, &gen);
+
+
+  int r = Tool.run(newFrontendActionFactory(&finder).get());
+
+  pprSetConstraints(gen.getConstraints());
+
+  return r;
+  /* return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get()); */
 }
 
 

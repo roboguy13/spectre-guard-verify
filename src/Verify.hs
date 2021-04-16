@@ -38,6 +38,8 @@ import           Data.Typeable
 import           Data.Proxy
 import           Data.Kind
 
+import qualified Data.ByteString as BS
+
 import           Data.Maybe (maybeToList)
 
 import qualified Data.List as L
@@ -533,10 +535,11 @@ data GCC_NoIncludes = GCC_NoIncludes FilePath
 
 instance Preprocessor GCC_NoIncludes where
   parseCPPArgs (GCC_NoIncludes path) = parseCPPArgs (newGCC path)
+
   runCPP (GCC_NoIncludes path) cpp_args = do
     let tempFile = replaceExtension (inputFile cpp_args) "i-sed"
 
-    (_, Just h1, _, p1) <- createProcess (proc "sed" ["/^#include/d", inputFile cpp_args]) { std_out = CreatePipe }
+    (_, Just h1, _, p1) <- createProcess (proc "sed" ["s/^[[:space:]]*#[[:space:]]*include.*//", inputFile cpp_args]) { std_out = CreatePipe }
     (_, _, _, p2)       <- createProcess (proc path (buildCppArgs' cpp_args ++ ["-E", "-"])) { std_in = UseHandle h1 }
 
     waitForProcess p1
@@ -561,7 +564,8 @@ gccPath = "/usr/bin/gcc"
 
 main :: IO ()
 main = do
-  let fileName = "../test.c"
+  -- let fileName = "../test.c"
+  let fileName = "/Users/david/cat.c"
 
   let gcc = GCC_NoIncludes gccPath
 
