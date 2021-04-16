@@ -36,6 +36,8 @@ void ConstraintGenerator::pushConstraint(SetExpr* lhs, SetExpr* rhs) {
 }
 
 void ConstraintGenerator::handle(const Stmt* stmt) {
+  if (!stmt) return;
+
   if (CompoundStmt::classof(stmt)) {
     handle(static_cast<const CompoundStmt*>(stmt));
   } else if (IfStmt::classof(stmt)) {
@@ -50,14 +52,16 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
 }
 
 void ConstraintGenerator::handle(const BinaryOperator* b) {
-  
+  if (!b) return;
 }
 
 void ConstraintGenerator::handle(const IfStmt* stmt) {
-  
+  if (!stmt) return;
 }
 
 void ConstraintGenerator::handle(const CompoundStmt* cs) {
+  if (!cs) return;
+
   if (const Stmt* last = *(cs->body_begin())) {
     for (auto it = cs->body_begin()+1; it != cs->body_end(); ++it) {
       pushConstraint(new C_Entry(node(*it)), new C_Exit(node(last)));
@@ -68,49 +72,39 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
 }
 
 void ConstraintGenerator::run(const clang::ast_matchers::MatchFinder::MatchResult &result) {
-  if (const CompoundStmt* cs = result.Nodes.getNodeAs<CompoundStmt>("compoundStmt")) {
-    llvm::errs() << "found compount stmt\n";
-    handle(cs);
+  if (const FunctionDecl* f = result.Nodes.getNodeAs<FunctionDecl>("functionDecl")) {
+    handle(f->getBody());
   }
 }
 
 SetConstraints ConstraintGenerator::getConstraints() const { return constraints; }
 
-// Apply a custom category to all command-line options so that they are the
-// only ones displayed.
-static llvm::cl::OptionCategory MyToolCategory("sg-analyze options");
+static llvm::cl::OptionCategory MyToolCategory("sg-verify options");
 
-// CommonOptionsParser declares HelpMessage with a description of the common
-// command-line options related to the compilation database and input files.
-// It's nice to have this help message in all tools.
 static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 
-// A help message for this specific tool can be added afterwards.
-static cl::extrahelp MoreHelp("\nMore help text...\n");
-
 int main(int argc, const char **argv) {
-  auto ExpectedParser = CommonOptionsParser::create(argc, argv, MyToolCategory, llvm::cl::OneOrMore);
-  if (!ExpectedParser) {
-    // Fail gracefully for unsupported options.
-    llvm::errs() << ExpectedParser.takeError();
+  auto expectedParser = CommonOptionsParser::create(argc, argv, MyToolCategory, llvm::cl::OneOrMore);
+  if (!expectedParser) {
+    llvm::errs() << expectedParser.takeError();
     return 1;
   }
-  CommonOptionsParser& OptionsParser = ExpectedParser.get();
-  ClangTool Tool(OptionsParser.getCompilations(),
-                 OptionsParser.getSourcePathList());
+  CommonOptionsParser& optionsParser = expectedParser.get();
+  ClangTool tool(optionsParser.getCompilations(),
+                 optionsParser.getSourcePathList());
 
   llvm::errs() << "plugin output\n";
   ConstraintGenerator gen;
 
-  auto matcher = ast_matchers::functionDecl();
+  auto matcher = ast_matchers::functionDecl().bind("functionDecl");
   ast_matchers::MatchFinder finder;
 
   finder.addMatcher(matcher, &gen);
 
 
-  int r = Tool.run(newFrontendActionFactory(&finder).get());
+  int r = tool.run(newFrontendActionFactory(&finder).get());
 
-  pprSetConstraints(gen.getConstraints());
+  llvm::errs() << pprSetConstraints(gen.getConstraints());
 
   return r;
   /* return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get()); */

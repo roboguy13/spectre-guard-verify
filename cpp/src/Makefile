@@ -27,16 +27,17 @@ LLVM_LIB_DIR=/usr/local/opt/llvm/lib
 CXXFLAGS=-I/usr/local/opt/llvm/include -L$(LLVM_LIB_DIR) -std=c++17
 
 OBJS=SetExpr.o ConstraintGen.o
+DEBUG=-g
 
 EXE=sg-verify
 
 all: sg-verify
 
 sg-verify: $(OBJS)
-	$(CXX) $(LIBS) $(OBJS) -o $(EXE) $(LIBDIR) $(LLVM_LIBS) $(LLVM_LIB_DIR)/*.dylib
+	$(CXX) $(DEBUG) $(LIBS) $(OBJS) -o $(EXE) $(LIBDIR) $(LLVM_LIBS) $(LLVM_LIB_DIR)/*.dylib
 
 %.o: %.cpp $(DEPS)
-	$(CXX) -c -o $@ $< $(CXXFLAGS)
+	$(CXX) $(DEBUG) -c -o $@ $< $(CXXFLAGS)
 
 clean:
 	rm -f *.o $(EXE)
