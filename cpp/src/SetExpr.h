@@ -19,12 +19,17 @@ enum Sensitivity
 
 enum SetExprAtomKind
 {
-  SINGLE_VAR,
-  SF_BASE,
+  /* SINGLE_VAR, */
   SF_C_ENTRY,
   SF_C_EXIT,
   SF_S,
   SF_E
+};
+
+enum ConditionKind
+{
+  SENS_EQUAL,
+  PAIR_IN
 };
 
 struct NodeId
@@ -70,25 +75,28 @@ public:
   virtual std::string ppr() const=0;
 
   virtual void accept(SetExprVisitor& visitor) const=0;
+
+  virtual bool isEmptySet() const;
 };
 
 class SetExprAtom : public SetExpr
 {
 public:
-  const SetExprAtomKind kind = SF_BASE;
+  virtual SetExprAtomKind getKind() const = 0;
+  bool isEmptySet() const;
 };
 
 class C_Entry : public SetExprAtom
 {
   NodeId arg;
 public:
-  const SetExprAtomKind kind = SF_C_ENTRY;
-
   C_Entry(NodeId arg);
 
   NodeId getArg() const;
 
   std::string ppr() const;
+
+  SetExprAtomKind getKind() const;
 
   void accept(SetExprVisitor& visitor) const;
 };
@@ -97,13 +105,12 @@ class C_Exit : public SetExprAtom
 {
   NodeId arg;
 public:
-  const SetExprAtomKind kind = SF_C_ENTRY;
-
   C_Exit(NodeId arg);
 
   NodeId getArg() const;
 
   std::string ppr() const;
+  SetExprAtomKind getKind() const;
 
   void accept(SetExprVisitor& visitor) const;
 };
@@ -112,14 +119,13 @@ class S_Family : public SetExprAtom
 {
   NodeId first, second;
 public:
-  const SetExprAtomKind kind = SF_S;
-
   S_Family(NodeId, NodeId);
 
   NodeId getFirst() const;
   NodeId getSecond() const;
 
   std::string ppr() const;
+  SetExprAtomKind getKind() const;
 
   void accept(SetExprVisitor& visitor) const;
 };
@@ -128,13 +134,12 @@ class E_Family : public SetExprAtom
 {
   NodeId arg;
 public:
-  const SetExprAtomKind kind = SF_E;
-
   E_Family(NodeId);
 
   NodeId getArg() const;
 
   std::string ppr() const;
+  SetExprAtomKind getKind() const;
 
   void accept(SetExprVisitor& visitor) const;
 };
@@ -147,16 +152,17 @@ public:
   std::string ppr() const;
 
   void accept(SetExprVisitor& visitor) const;
+  bool isEmptySet() const;
 };
 
 class SetConstraint
 {
-  SetExpr* lhs;
+  SetExprAtom* lhs;
   SetExpr* rhs;
 public:
-  SetConstraint(SetExpr* lhs, SetExpr* rhs);
+  SetConstraint(SetExprAtom* lhs, SetExpr* rhs);
 
-  SetExpr* getLHS() const;
+  SetExprAtom* getLHS() const;
   SetExpr* getRHS() const;
 
   std::string ppr() const;
@@ -178,6 +184,7 @@ public:
 
   std::string ppr() const;
   void accept(SetExprVisitor& visitor) const;
+  bool isEmptySet() const;
 };
 
 class SensT : public SensExpr
@@ -190,6 +197,7 @@ public:
 
   std::string ppr() const;
   void accept(SetExprVisitor& visitor) const;
+  bool isEmptySet() const;
 };
 
 class SetUnion : public SetExpr
@@ -229,6 +237,8 @@ struct Condition
 {
   virtual std::string ppr() const=0;
   virtual void accept(ConditionVisitor&) const=0;
+
+  virtual ConditionKind getKind() const=0;
 };
 
 class SensEqual : public Condition
@@ -238,11 +248,12 @@ class SensEqual : public Condition
 public:
   SensEqual(SensExpr*, SensExpr*);
 
-  SensExpr* getLhs() const;
-  SensExpr* getRhs() const;
+  SensExpr* getLHS() const;
+  SensExpr* getRHS() const;
 
   std::string ppr() const;
   void accept(ConditionVisitor& visitor) const;
+  ConditionKind getKind() const;
 };
 
 class PairIn : public Condition
@@ -259,6 +270,7 @@ public:
 
   std::string ppr() const;
   void accept(ConditionVisitor& visitor) const;
+  ConditionKind getKind() const;
 };
 
 class SetIfThenElse : public SetExpr

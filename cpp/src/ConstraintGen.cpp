@@ -36,7 +36,7 @@ VarId ConstraintGenerator::var(const T* x) {
   return varIdGen.getId(x->getSourceRange().getBegin());
 }
 
-void ConstraintGenerator::pushConstraint(SetExpr* lhs, SetExpr* rhs) {
+void ConstraintGenerator::pushConstraint(SetExprAtom* lhs, SetExpr* rhs) {
   constraints.push_back(new SetConstraint(lhs, rhs));
 }
 
@@ -136,36 +136,7 @@ void ConstraintGenerator::finalizeConstraints() {
   pushConstraint(new C_Entry(n), new EmptySet());
 }
 
-SetConstraints ConstraintGenerator::getConstraints() const { return constraints; }
+const SetConstraints& ConstraintGenerator::getConstraints() const { return constraints; }
 
-static llvm::cl::OptionCategory MyToolCategory("sg-verify options");
-
-static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
-
-int main(int argc, const char **argv) {
-  auto expectedParser = CommonOptionsParser::create(argc, argv, MyToolCategory, llvm::cl::OneOrMore);
-  if (!expectedParser) {
-    llvm::errs() << expectedParser.takeError();
-    return 1;
-  }
-  CommonOptionsParser& optionsParser = expectedParser.get();
-  ClangTool tool(optionsParser.getCompilations(),
-                 optionsParser.getSourcePathList());
-
-  ConstraintGenerator gen;
-
-  auto matcher = ast_matchers::functionDecl().bind("functionDecl");
-  ast_matchers::MatchFinder finder;
-
-  finder.addMatcher(matcher, &gen);
-
-
-  int r = tool.run(newFrontendActionFactory(&finder).get());
-  gen.finalizeConstraints();
-
-  llvm::errs() << pprSetConstraints(gen.getConstraints());
-
-  return r;
-  /* return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get()); */
-}
-
+const IdGenerator<NodeId>& ConstraintGenerator::getNodeIdGen() const { return nodeIdGen; }
+const IdGenerator<VarId>& ConstraintGenerator::getVarIdGen() const { return varIdGen; }

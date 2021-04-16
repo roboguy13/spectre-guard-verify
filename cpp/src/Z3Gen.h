@@ -23,15 +23,15 @@ class Z3Gen
   template<typename T, typename F>
   z3::sort toEnumSort(char const* sortName, std::string prefix, std::vector<T>& ids, F toStr, z3::func_decl_vector& cs);
 public:
-  Z3Gen(IdGenerator<VarId>& varGen, IdGenerator<NodeId>& nodeGen);
+  Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen);
 
   z3::sort getVarSort() const;
   z3::sort getNodeIdSort() const;
   z3::sort getSensSort() const;
 
-  z3::expr generate(SetConstraint& c) const;
+  z3::expr generate(const SetConstraint& c);
 
-  std::vector<z3::expr> generate(SetConstraints& cs) const;
+  std::vector<z3::expr> generate(const SetConstraints& cs);
 
   z3::func_decl getVarFuncDecl(VarId v) const;
   z3::func_decl getNodeIdFuncDecl(NodeId n) const;
@@ -54,11 +54,11 @@ class Z3SetExprVisitor : public SetExprVisitor
   z3::expr expr;
   Z3Gen& z3Gen;
 
-  NodeId n;
-  VarId v;
-  Sensitivity s;
+  z3::expr v;
+  z3::expr s;
 public:
-  Z3SetExprVisitor(Z3Gen& z3Gen, z3::expr expr, NodeId n, VarId v, Sensitivity s);
+  Z3SetExprVisitor(Z3Gen& z3Gen, z3::expr expr, z3::expr v, z3::expr s);
+  Z3SetExprVisitor(Z3SetExprVisitor& v);
 
   z3::expr getExpr() const;
 

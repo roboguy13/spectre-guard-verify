@@ -24,7 +24,7 @@ z3::sort Z3Gen::toEnumSort(char const* sortName, std::string prefix, std::vector
   return r;
 }
 
-Z3Gen::Z3Gen(IdGenerator<VarId>& varGen, IdGenerator<NodeId>& nodeGen) : varSort(context), nodeIdSort(context), sensSort(context), var_cs(context), nodeId_cs(context), sens_cs(context)
+Z3Gen::Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen) : varSort(context), nodeIdSort(context), sensSort(context), var_cs(context), nodeId_cs(context), sens_cs(context)
  , s_decl(context), t_decl(context), c_entry_decl(context), c_exit_decl(context) {
   vars = varGen.getIds();
   nodeIds = nodeGen.getIds();
@@ -56,6 +56,46 @@ Z3Gen::Z3Gen(IdGenerator<VarId>& varGen, IdGenerator<NodeId>& nodeGen) : varSort
 z3::sort Z3Gen::getVarSort() const { return varSort; }
 z3::sort Z3Gen::getNodeIdSort() const { return nodeIdSort; }
 z3::sort Z3Gen::getSensSort() const { return sensSort; }
+
+z3::expr Z3Gen::generate(const SetConstraint& c) {
+  auto trueExpr = context.bool_val(true);
+
+  switch (c.getLHS()->getKind()) {
+    case SF_C_ENTRY:
+    case SF_C_EXIT:
+    case SF_S:
+      {
+        auto v = context.constant("v", varSort);
+        auto s = context.constant("s", sensSort);
+
+        Z3SetExprVisitor visitorLHS(*this, trueExpr, v, s);
+
+        if (c.getRHS()->isEmptySet()) {
+          return !(z3::forall(v, s, visitorLHS.getExpr()));
+        } else {
+          Z3SetExprVisitor visitorRHS(*this, trueExpr, v, s);
+
+          c.getLHS()->accept(visitorLHS);
+          c.getRHS()->accept(visitorRHS);
+
+          return z3::forall(v, s, visitorLHS.getExpr() == visitorRHS.getExpr());
+        }
+      }
+    default:
+      std::cerr << "*** error: Z3Gen::generate: Unrecognize LHS of kind " << c.getLHS()->getKind() << std::endl;
+      exit(1);
+  }
+}
+
+std::vector<z3::expr> Z3Gen::generate(const SetConstraints& cs) {
+  std::vector<z3::expr> r;
+
+  for (auto it = cs.begin(); it != cs.end(); ++it) {
+    r.push_back(generate(*(*it)));
+  }
+
+  return r;
+}
 
 
 z3::func_decl Z3Gen::getVarFuncDecl(VarId v) const {
@@ -92,7 +132,10 @@ z3::func_decl Z3Gen::getCExitFuncDecl() const { return c_exit_decl; }
 
 z3::context* Z3Gen::getContext() { return &context; }
 
-Z3SetExprVisitor::Z3SetExprVisitor(Z3Gen& z3Gen, z3::expr expr, NodeId n, VarId v, Sensitivity s) : expr(expr), z3Gen(z3Gen), n(n), v(v), s(s) { }
+Z3SetExprVisitor::Z3SetExprVisitor(Z3Gen& z3Gen, z3::expr expr, z3::expr v, z3::expr s) : expr(expr), z3Gen(z3Gen), v(v), s(s) { }
+
+Z3SetExprVisitor::Z3SetExprVisitor(Z3SetExprVisitor& visitor)
+  : expr(visitor.expr), z3Gen(visitor.z3Gen), v(visitor.v), s(visitor.s) { }
 
 void Z3SetExprVisitor::visit(const EmptySet&) { cerr << "*** error: visit: EmptySet\n"; }
 
@@ -123,14 +166,65 @@ void Z3SetExprVisitor::visit(const SetUnionPair& u) {
   u.getSens()->accept(*this);
   auto sensExpr = expr;
 
-  expr = lhsExpr || (z3Gen.var(v) == varExpr && z3Gen.sens(s) == sensExpr);
+  expr = lhsExpr || (v == varExpr && s == sensExpr);
 }
 
-void Z3SetExprVisitor::visit(const SetIfThenElse&) {
+void Z3SetExprVisitor::visit(const SetIfThenElse& ite) {
+  switch (ite.getCond()->getKind()) {
+    case SENS_EQUAL:
+      {
+        SensEqual* eq = static_cast<SensEqual*>(ite.getCond());
+
+        eq->getLHS()->accept(*this);
+        auto eqX = expr;
+
+        eq->getRHS()->accept(*this);
+        auto eqY = expr;
+
+        ite.getThen()->accept(*this);
+        auto thenExpr = expr;
+
+        ite.getElse()->accept(*this);
+        auto elseExpr = expr;
+
+        expr = z3::ite(eqX == eqY, thenExpr, elseExpr);
+        break;
+      }
+    case PAIR_IN:
+      {
+        PairIn* pairIn = static_cast<PairIn*>(ite.getCond());
+
+        Z3SetExprVisitor visitor(*this);
+        visitor.v = z3Gen.var(pairIn->getVar());
+        visitor.s = z3Gen.sens(pairIn->getSens());
+        pairIn->getExpr()->accept(visitor);
+
+
+        ite.getThen()->accept(*this);
+        auto thenExpr = expr;
+
+        ite.getElse()->accept(*this);
+        auto elseExpr = expr;
+
+        expr = z3::ite(visitor.expr, thenExpr, elseExpr);
+        break;
+      }
+  }
 }
 
-void Z3SetExprVisitor::visit(const C_Entry&) { }
-void Z3SetExprVisitor::visit(const C_Exit&) { }
-void Z3SetExprVisitor::visit(const S_Family&) { }
-void Z3SetExprVisitor::visit(const E_Family&) { }
+void Z3SetExprVisitor::visit(const C_Entry& e) {
+  expr = z3Gen.getCEntryFuncDecl()(z3Gen.node(e.getArg()), v, s);
+}
+void Z3SetExprVisitor::visit(const C_Exit& e) {
+  expr = z3Gen.getCExitFuncDecl()(z3Gen.node(e.getArg()), v, s);
+}
+void Z3SetExprVisitor::visit(const S_Family& sf) {
+  auto firstExpr = z3Gen.node(sf.getFirst());
+  auto secondExpr = z3Gen.node(sf.getSecond());
+
+  expr = z3Gen.getSFuncDecl()(firstExpr, secondExpr, v, s);
+}
+void Z3SetExprVisitor::visit(const E_Family& ef) { }
+
+z3::expr Z3SetExprVisitor::getExpr() const { return expr; }
 

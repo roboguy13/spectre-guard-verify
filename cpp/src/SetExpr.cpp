@@ -20,20 +20,25 @@ bool operator<(const VarId x, const VarId y) { return x.id < y.id; }
 string NodeId::ppr() const { return "n" + std::to_string(id); }
 string VarId::ppr() const { return std::to_string(id); }
 
+bool SetExpr::isEmptySet() const { return false; }
+
+bool SetExprAtom::isEmptySet() const { return false; }
+
 //
 // EmptySet //
 //
 
 string EmptySet::ppr() const { return "{}"; }
 void EmptySet::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+bool EmptySet::isEmptySet() const { return true; }
 
 //
 // SetConstraint //
 //
 
-SetConstraint::SetConstraint(SetExpr* lhs, SetExpr* rhs) : lhs(lhs), rhs(rhs) { }
+SetConstraint::SetConstraint(SetExprAtom* lhs, SetExpr* rhs) : lhs(lhs), rhs(rhs) { }
 
-SetExpr* SetConstraint::getLHS() const { return lhs; }
+SetExprAtom* SetConstraint::getLHS() const { return lhs; }
 SetExpr* SetConstraint::getRHS() const { return rhs; }
 
 string SetConstraint::ppr() const {
@@ -46,6 +51,8 @@ string SetConstraint::ppr() const {
 //
 
 SensAtom::SensAtom(Sensitivity sens) : sens(sens) { }
+
+Sensitivity SensAtom::getSens() const { return sens; }
 
 string SensAtom::ppr() const {
   switch (sens) {
@@ -60,6 +67,7 @@ string SensAtom::ppr() const {
 }
 
 void SensAtom::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+bool SensAtom::isEmptySet() const { return false; }
 
 //
 // SensT //
@@ -75,6 +83,7 @@ string SensT::ppr() const {
 }
 
 void SensT::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+bool SensT::isEmptySet() const { return false; }
 
 //
 // C_Entry
@@ -87,6 +96,8 @@ NodeId C_Entry::getArg() const { return arg; }
 string C_Entry::ppr() const { return "C_entry(" + arg.ppr() + ")"; }
 void C_Entry::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
+SetExprAtomKind C_Entry::getKind() const { return SF_C_ENTRY; }
+
 //
 // C_Exit
 //
@@ -98,6 +109,7 @@ NodeId C_Exit::getArg() const { return arg; }
 string C_Exit::ppr() const { return "C_exit(" + arg.ppr() + ")"; }
 void C_Exit::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
 
+SetExprAtomKind C_Exit::getKind() const { return SF_C_EXIT; }
 //
 // S_Family
 //
@@ -109,6 +121,7 @@ NodeId S_Family::getSecond() const { return second; }
 
 string S_Family::ppr() const { return "S(" + first.ppr() + ", " + second.ppr() + ")"; }
 void S_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+SetExprAtomKind S_Family::getKind() const { return SF_S; }
 
 //
 // E_Family
@@ -121,6 +134,7 @@ NodeId E_Family::getArg() const { return arg; }
 string E_Family::ppr() const { return "E(" + arg.ppr() + ")"; }
 
 void E_Family::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+SetExprAtomKind E_Family::getKind() const { return SF_E; }
 
 //
 // SetUnion //
@@ -158,11 +172,12 @@ void SetUnionPair::accept(SetExprVisitor& visitor) const { visitor.visit(*this);
 
 SensEqual::SensEqual(SensExpr* lhs, SensExpr* rhs) : lhs(lhs), rhs(rhs) { }
 
-SensExpr* SensEqual::getLhs() const { return lhs; }
-SensExpr* SensEqual::getRhs() const { return rhs; }
+SensExpr* SensEqual::getLHS() const { return lhs; }
+SensExpr* SensEqual::getRHS() const { return rhs; }
 
 string SensEqual::ppr() const { return lhs->ppr() + " = " + rhs->ppr(); }
 void SensEqual::accept(ConditionVisitor& visitor) const { visitor.visit(*this); }
+ConditionKind SensEqual::getKind() const { return SENS_EQUAL; }
 
 //
 // PairIn //
@@ -175,6 +190,7 @@ SetExpr* PairIn::getExpr() const { return expr; }
 
 string PairIn::ppr() const { return "(" + var.ppr() + ", " + SensAtom(sens).ppr() + ") in " + expr->ppr(); }
 void PairIn::accept(ConditionVisitor& visitor) const { visitor.visit(*this); }
+ConditionKind PairIn::getKind() const { return PAIR_IN; }
 
 //
 // SetIfThenElse //
