@@ -57,7 +57,9 @@ public:
   IdGenerator();
 
   T getId(clang::SourceLocation);
-  T getIdByUniq(int id);
+  T getIdByUniq(int id) const;
+
+  std::vector<T> getIds() const;
 };
 
 class SetExprVisitor;
@@ -320,7 +322,7 @@ T IdGenerator<T>::getId(clang::SourceLocation srcLoc) {
 }
 
 template<typename T>
-T IdGenerator<T>::getIdByUniq(int id) {
+T IdGenerator<T>::getIdByUniq(int id) const {
   for (auto it = ids.begin(); it != ids.end(); ++it) {
     if (it->second.id == id) {
       return it->second;
@@ -331,6 +333,17 @@ T IdGenerator<T>::getIdByUniq(int id) {
   NodeId n;
   n.id = -1;
   return n;
+}
+
+template<typename T>
+std::vector<T> IdGenerator<T>::getIds() const {
+  std::vector<T> r;
+
+  for (auto it = ids.begin(); it != ids.end(); ++it) {
+    r.push_back(it->second);
+  }
+
+  return r;
 }
 
 #endif
