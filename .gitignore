@@ -7,3 +7,4 @@ src/CMakeFiles
 *.so
 a.out
 *.dylib
+**/sg-verify
