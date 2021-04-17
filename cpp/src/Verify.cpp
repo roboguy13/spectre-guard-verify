@@ -57,6 +57,7 @@ int main(int argc, const char **argv) {
     for (auto it = exprs.begin(); it != exprs.end(); ++it) {
       std::cout << *it << "\n";
     }
+    z3Gen.assertExprs(exprs);
   } catch (z3::exception e) {
     std::cerr << "Z3 exception: " << e.msg() << std::endl;
     return 1;

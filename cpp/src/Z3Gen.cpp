@@ -44,6 +44,24 @@ void Z3Gen::generateTs(std::vector<z3::expr>& vec) {
   }
 }
 
+void Z3Gen::generateCorrectnessCondition(std::vector<z3::expr>& vec) {
+  auto n = context.constant("n", nodeIdSort);
+  auto v = context.constant("v", varSort);
+  auto s = context.constant("s", sensSort);
+  auto s2 = context.constant("s2", sensSort);
+
+
+  auto cond = c_exit_decl(n, v, s) && c_exit_decl(n, v, s2);
+
+  auto e = z3::forall(n, z3::forall(v, s, s2,
+      z3::implies(
+        cond,
+        s == s2
+      )
+    )
+  );
+}
+
 
 Z3Gen::Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen, std::vector< std::pair<NodeId, NodeId> > sPairs, std::vector<NodeId> tNodes) : varSort(context), nodeIdSort(context), sensSort(context), var_cs(context), nodeId_cs(context), sens_cs(context)
  , s_decl(context), t_decl(context), e_decl(context), c_entry_decl(context), c_exit_decl(context), sPairs(sPairs), tNodes(tNodes) {
@@ -143,14 +161,38 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
 std::vector<z3::expr> Z3Gen::generate(const SetConstraints& cs) {
   std::vector<z3::expr> r;
 
-  generateSs(r);
-  generateTs(r);
-
   for (auto it = cs.begin(); it != cs.end(); ++it) {
     r.push_back(generate(*(*it)));
   }
 
+  generateSs(r);
+  generateTs(r);
+  generateCorrectnessCondition(r);
+
   return r;
+}
+
+void Z3Gen::assertExprs(const std::vector<z3::expr>& es) {
+  z3::solver solver(context);
+
+  for (auto it = es.begin(); it != es.end(); ++it) {
+    solver.add(*it);
+  }
+
+  auto result = solver.check();
+  switch (result) {
+    case z3::unsat:
+      std::cout << "Solver: Unsat\n";
+      break;
+    case z3::sat:
+      std::cout << "Solver: Sat\n";
+      std::cout << "--- Model ---\n";
+      std::cout << solver.get_model() << "\n";
+      break;
+    case z3::unknown:
+      std::cout << "Solver: Unknown\n";
+      break;
+  }
 }
 
 

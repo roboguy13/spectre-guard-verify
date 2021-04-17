@@ -28,6 +28,8 @@ class Z3Gen
 
   void generateSs(std::vector<z3::expr>& vec);
   void generateTs(std::vector<z3::expr>& vec);
+
+  void generateCorrectnessCondition(std::vector<z3::expr>& vec);
 public:
   Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen, std::vector< std::pair<NodeId, NodeId> > sPairs, std::vector<NodeId> tNodes);
 
@@ -38,6 +40,8 @@ public:
   z3::expr generate(const SetConstraint& c);
 
   std::vector<z3::expr> generate(const SetConstraints& cs);
+
+  void assertExprs(const std::vector<z3::expr>& es);
 
   z3::func_decl getVarFuncDecl(VarId v) const;
   z3::func_decl getNodeIdFuncDecl(NodeId n) const;
