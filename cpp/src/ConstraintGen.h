@@ -27,9 +27,6 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   NodeId node(const T* t);
 
   template<typename T>
-  NodeId node1(const T* t);
-
-  template<typename T>
   VarId var(const T* t);
 
   void handle(const clang::IfStmt* stmt);
@@ -40,9 +37,16 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   void handle(const clang::VarDecl*);
   void handle(const clang::Expr* e);
   void handle(const clang::ImplicitCastExpr* e);
+  void handle(const clang::DeclRefExpr* dre);
+
+  template<typename S, typename T>
+  void handleCasted(const T* x);
 
   std::vector< std::pair<NodeId, NodeId> > sPairs;
   std::vector<NodeId> tNodes;
+
+  void connect(NodeId x, NodeId y);
+  void nop(NodeId x);
 
   const clang::ast_matchers::MatchFinder::MatchResult* result;
 public:
