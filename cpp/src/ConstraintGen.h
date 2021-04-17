@@ -47,6 +47,7 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
 
   void connect(NodeId x, NodeId y);
   void nop(NodeId x);
+  void merge(NodeId x, NodeId y);
 
   const clang::ast_matchers::MatchFinder::MatchResult* result;
 public:

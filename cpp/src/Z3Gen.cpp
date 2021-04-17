@@ -60,6 +60,8 @@ void Z3Gen::generateCorrectnessCondition(std::vector<z3::expr>& vec) {
       )
     )
   );
+
+  vec.push_back(e);
 }
 
 

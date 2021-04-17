@@ -57,17 +57,24 @@ void ConstraintGenerator::handleCasted(const T* x) {
   NodeId n2 = node(static_cast<const S*>(x));
   handle(static_cast<const S*>(x));
   if (n1.id != n2.id) {
+    /* merge(n1, n2); */
     connect(n2, n1);
   }
 }
 
 void ConstraintGenerator::connect(NodeId x, NodeId y) {
-  /* cerr << "\t" << x.id << " -----> " << y.id << "\n"; */
+  cerr << "\t" << x.id << " -----> " << y.id << "\n";
   pushConstraint(new C_Entry(y), new C_Exit(x));
 }
 
 void ConstraintGenerator::nop(NodeId x) {
   pushConstraint(new C_Exit(x), new C_Entry(x));
+}
+
+void ConstraintGenerator::merge(NodeId x, NodeId y) {
+  cerr << "\t" << x.id << "  merge  " << y.id << "\n";
+  pushConstraint(new C_Exit(x), new C_Exit(y));
+  pushConstraint(new C_Entry(x), new C_Entry(y));
 }
 
 void ConstraintGenerator::pushConstraint(SetExprAtom* lhs, SetExpr* rhs) {
@@ -118,6 +125,8 @@ void ConstraintGenerator::handle(const BinaryOperator* b) {
 
       handleCasted<DeclRefExpr>(lhs);
 
+      /* std::cout << "+++++ " << */ 
+
       auto v = var(static_cast<const DeclRefExpr*>(lhs)->getFoundDecl());
 
       pushConstraint(new C_Exit(n), new SetIfThenElse(new PairIn(v, PUBLIC, new C_Entry(n)),
@@ -127,8 +136,12 @@ void ConstraintGenerator::handle(const BinaryOperator* b) {
     }
   } else {
     pushConstraint(new E_Family(n), new SetUnion(new E_Family(node(b->getLHS())), new E_Family(node(b->getRHS()))));
+    /* merge(node(b), node(b->getLHS())); */
     handle(b->getLHS());
   }
+  pushConstraint(new C_Entry(node(b->getRHS())), new C_Entry(node(b)));
+  nop(node(b->getRHS()));
+  /* merge(node(b), node(b->getRHS())); */
   handle(b->getRHS());
   /* handle(b->getLHS()); */
 }
@@ -138,6 +151,7 @@ void ConstraintGenerator::handle(const IfStmt* stmt) {
 }
 
 void ConstraintGenerator::handle(const DeclRefExpr* dre) {
+  /* std::cout << "dre: " << node(dre).id << std::endl; */
   connect(node(dre), node(dre));
 }
 
@@ -168,10 +182,11 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
 void ConstraintGenerator::handle(const DeclStmt* d) {
   auto last = *(d->decl_begin());
   if (VarDecl::classof(last)) {
-    std::cerr << "node ids: " << node(d).id << ", " << node(static_cast<const VarDecl*>(last)).id << std::endl;
-    std::cerr << "^---> node ids: " << node(d).id << ", " << node(static_cast<const VarDecl*>(last)).id << std::endl;
+    /* std::cerr << "node ids: " << node(d).id << ", " << node(static_cast<const VarDecl*>(last)).id << std::endl; */
+    /* std::cerr << "^---> node ids: " << node(d).id << ", " << node(static_cast<const VarDecl*>(last)).id << std::endl; */
     handleCasted<VarDecl>(last);
-    connect(node(d), node(static_cast<const VarDecl*>(last))); //, node(d));
+    /* connect(node(d), node(static_cast<const VarDecl*>(last))); //, node(d)); */
+    merge(node(d), node(static_cast<const VarDecl*>(last))); //, node(d));
   } else {
     /* std::cerr << "not VarDecl ????\n"; */
   }
@@ -220,6 +235,7 @@ void ConstraintGenerator::handle(const Expr* e) {
   } else if (ImplicitCastExpr::classof(e)) {
     /* handle(static_cast<const ImplicitCastExpr*>(e)); */
     handleCasted<ImplicitCastExpr>(e);
+    /* std::cout << "implicit: " << n.id << "  --  " << node(static_cast<const ImplicitCastExpr*>(e)).id << std::endl; */
   } else {
     std::cerr << "handle else\n";
   }
@@ -234,8 +250,8 @@ void ConstraintGenerator::run(const clang::ast_matchers::MatchFinder::MatchResul
     if (f->hasBody()) {
       entryNodes.push_back(node(f));
       pushConstraint(new C_Entry(node(f)), new EmptySet());
-      pushConstraint(new C_Exit(node(f)), new C_Entry(node(f)));
-      pushConstraint(new C_Entry(node(f->getBody())), new C_Exit(node(f)));
+      nop(node(f));
+      connect(node(f), node(f->getBody()));
       handle(f->getBody());
     }
   }
