@@ -24,8 +24,29 @@ z3::sort Z3Gen::toEnumSort(char const* sortName, std::string prefix, std::vector
   return r;
 }
 
-Z3Gen::Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen) : varSort(context), nodeIdSort(context), sensSort(context), var_cs(context), nodeId_cs(context), sens_cs(context)
- , s_decl(context), t_decl(context), c_entry_decl(context), c_exit_decl(context) {
+void Z3Gen::generateSs(std::vector<z3::expr>& vec) {
+  
+}
+
+void Z3Gen::generateTs(std::vector<z3::expr>& vec) {
+  /* z3::expr e; */
+
+  auto v = context.constant("v", varSort);
+  auto v2 = context.constant("v2", varSort);
+
+  for (auto it = tNodes.begin(); it != tNodes.end(); ++it) {
+    auto condExpr = (z3::forall(v, !e_decl(node(*it), v)))
+                        ||
+                    (z3::forall(v2, implies(e_decl(node(*it), v2), c_entry_decl(node(*it), v2, sens(PUBLIC)))));
+
+    auto e = z3::ite(condExpr, t_decl(node(*it)) == sens(PUBLIC), t_decl(node(*it)) == sens(SECRET));
+    vec.push_back(e);
+  }
+}
+
+
+Z3Gen::Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen, std::vector< std::pair<NodeId, NodeId> > sPairs, std::vector<NodeId> tNodes) : varSort(context), nodeIdSort(context), sensSort(context), var_cs(context), nodeId_cs(context), sens_cs(context)
+ , s_decl(context), t_decl(context), e_decl(context), c_entry_decl(context), c_exit_decl(context), sPairs(sPairs), tNodes(tNodes) {
   vars = varGen.getIds();
   nodeIds = nodeGen.getIds();
 
@@ -43,9 +64,11 @@ Z3Gen::Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGe
 
   z3::sort s_sorts[4] = { nodeIdSort, nodeIdSort, varSort, sensSort };
   z3::sort t_sorts[1] = { nodeIdSort };
+  z3::sort e_sorts[2] = { nodeIdSort, varSort };
 
   s_decl = context.function("S", 4, s_sorts, boolSort);
   t_decl = context.function("T", 1, t_sorts, sensSort);
+  e_decl = context.function("E", 2, e_sorts, boolSort);
 
 
   z3::sort c_entry_sorts[3] = { nodeIdSort, varSort, sensSort };
@@ -81,6 +104,34 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
           return z3::forall(v, s, visitorLHS.getExpr() == visitorRHS.getExpr());
         }
       }
+    case SF_E:
+      {
+        auto v = context.constant("v", varSort);
+        auto n = node(static_cast<const E_Family*>(c.getLHS())->getArg());
+        auto s_ = context.constant("s_", sensSort);
+
+
+        Z3SetExprVisitor visitorLHS(*this, n, v, s_);
+        c.getLHS()->accept(visitorLHS);
+
+        if (c.getRHS()->isSingleVar()) {
+          return z3::forall(v,
+            z3::ite(v == var(static_cast<const SingleVar*>(c.getRHS())->getVarId()),
+              visitorLHS.getExpr(),
+              !visitorLHS.getExpr()
+            )
+          );
+        } else {
+          Z3SetExprVisitor visitorRHS(*this, n, v, s_);
+          c.getRHS()->accept(visitorRHS);
+          auto rhsExpr = visitorRHS.getExpr();
+          return z3::forall(v, e_decl(n, v) == rhsExpr);
+        }
+
+        /* auto r = z3::forall(v, e_decl(n, v) == rhsExpr); */
+        /* cerr << "r = " << r << "\n"; */
+        /* return r; */
+      }
     default:
       std::cerr << "*** error: Z3Gen::generate: Unrecognize LHS of kind " << c.getLHS()->getKind() << std::endl;
       exit(1);
@@ -89,6 +140,9 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
 
 std::vector<z3::expr> Z3Gen::generate(const SetConstraints& cs) {
   std::vector<z3::expr> r;
+
+  generateSs(r);
+  generateTs(r);
 
   for (auto it = cs.begin(); it != cs.end(); ++it) {
     r.push_back(generate(*(*it)));
@@ -129,6 +183,7 @@ z3::func_decl Z3Gen::getTFuncDecl() const { return t_decl; }
 z3::func_decl Z3Gen::getSFuncDecl() const { return s_decl; }
 z3::func_decl Z3Gen::getCEntryFuncDecl() const { return c_entry_decl; }
 z3::func_decl Z3Gen::getCExitFuncDecl() const { return c_exit_decl; }
+z3::func_decl Z3Gen::getEFuncDecl() const { return e_decl; }
 
 z3::context* Z3Gen::getContext() { return &context; }
 
@@ -224,7 +279,13 @@ void Z3SetExprVisitor::visit(const S_Family& sf) {
 
   expr = z3Gen.getSFuncDecl()(firstExpr, secondExpr, v, s);
 }
-void Z3SetExprVisitor::visit(const E_Family& ef) { }
+void Z3SetExprVisitor::visit(const E_Family& ef) {
+  expr = z3Gen.getEFuncDecl()(expr, v);
+  /* std::cerr << "*** error: Z3SetExprVisitor::visit: called on E_Family\n"; */
+}
+void Z3SetExprVisitor::visit(const SingleVar& sv) {
+  expr = z3Gen.var(sv.getVarId());
+}
 
 z3::expr Z3SetExprVisitor::getExpr() const { return expr; }
 

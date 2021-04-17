@@ -46,14 +46,20 @@ int main(int argc, const char **argv) {
 
   llvm::errs() << pprSetConstraints(gen.getConstraints());
 
-  Z3Gen z3Gen(gen.getVarIdGen(), gen.getNodeIdGen());
+  try {
+    Z3Gen z3Gen(gen.getVarIdGen(), gen.getNodeIdGen(), gen.getSPairs(), gen.getTNodes());
 
-  auto exprs = z3Gen.generate(gen.getConstraints());
+    auto exprs = z3Gen.generate(gen.getConstraints());
 
-  std::cout << "\nGenerated Z3 expressions:\n";
-  for (auto it = exprs.begin(); it != exprs.end(); ++it) {
-    std::cout << *it << "\n";
+    std::cout << "\nGenerated Z3 expressions:\n";
+    for (auto it = exprs.begin(); it != exprs.end(); ++it) {
+      std::cout << *it << "\n";
+    }
+  } catch (z3::exception e) {
+    std::cerr << "Z3 exception: " << e.msg() << std::endl;
+    return 1;
   }
+
 
   return r;
   /* return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get()); */

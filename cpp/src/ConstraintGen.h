@@ -4,6 +4,7 @@
 #include "SetExpr.h"
 
 #include <string>
+#include <vector>
 
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CommonOptionsParser.h"
@@ -32,6 +33,10 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   void handle(const clang::BinaryOperator* b);
   void handle(const clang::DeclStmt*);
   void handle(const clang::VarDecl*);
+  void handle(const clang::Expr* e);
+
+  std::vector< std::pair<NodeId, NodeId> > sPairs;
+  std::vector<NodeId> tNodes;
 public:
   ConstraintGenerator();
 
@@ -43,6 +48,9 @@ public:
 
   const IdGenerator<NodeId>& getNodeIdGen() const;
   const IdGenerator<VarId>& getVarIdGen() const;
+
+  const std::vector< std::pair<NodeId, NodeId> >& getSPairs() const;
+  const std::vector<NodeId>& getTNodes() const;
 };
 
 #endif

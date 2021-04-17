@@ -77,6 +77,7 @@ public:
   virtual void accept(SetExprVisitor& visitor) const=0;
 
   virtual bool isEmptySet() const;
+  virtual bool isSingleVar() const;
 };
 
 class SetExprAtom : public SetExpr
@@ -153,6 +154,20 @@ public:
 
   void accept(SetExprVisitor& visitor) const;
   bool isEmptySet() const;
+};
+
+class SingleVar : public SetExpr
+{
+  VarId v;
+public:
+  SingleVar(VarId);
+
+  VarId getVarId() const;
+
+  std::string ppr() const;
+
+  void accept(SetExprVisitor& visitor) const;
+  bool isSingleVar() const;
 };
 
 class SetConstraint
@@ -302,6 +317,7 @@ struct SetExprVisitor
   virtual void visit(const C_Exit&)=0;
   virtual void visit(const S_Family&)=0;
   virtual void visit(const E_Family&)=0;
+  virtual void visit(const SingleVar&)=0;
 };
 
 struct ConditionVisitor

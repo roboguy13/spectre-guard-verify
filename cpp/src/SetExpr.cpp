@@ -21,6 +21,7 @@ string NodeId::ppr() const { return "n" + std::to_string(id); }
 string VarId::ppr() const { return std::to_string(id); }
 
 bool SetExpr::isEmptySet() const { return false; }
+bool SetExpr::isSingleVar() const { return false; }
 
 bool SetExprAtom::isEmptySet() const { return false; }
 
@@ -165,6 +166,23 @@ SensExpr* SetUnionPair::getSens() const { return sens; }
 
 std::string SetUnionPair::ppr() const { return lhs->ppr() + " U {(" + var.ppr() + ", " + sens->ppr() + ")}"; }
 void SetUnionPair::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+//
+// SingleVar
+//
+SingleVar::SingleVar(VarId v) : v(v) { }
+
+VarId SingleVar::getVarId() const {
+  return v;
+}
+
+std::string SingleVar::ppr() const {
+  return "{" + std::to_string(v.id) + "}";
+}
+
+void SingleVar::accept(SetExprVisitor& visitor) const { visitor.visit(*this); }
+
+bool SingleVar::isSingleVar() const { return true; }
 
 //
 // SensEqual //

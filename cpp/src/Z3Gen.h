@@ -12,18 +12,24 @@ class Z3Gen
   std::vector<VarId> vars;
   std::vector<NodeId> nodeIds;
 
+  std::vector< std::pair<NodeId, NodeId> > sPairs;
+  std::vector<NodeId> tNodes;
+
   z3::context context;
 
   z3::sort varSort, nodeIdSort, sensSort;
 
   z3::func_decl_vector var_cs, nodeId_cs, sens_cs;
 
-  z3::func_decl t_decl, s_decl, c_entry_decl, c_exit_decl;
+  z3::func_decl t_decl, s_decl, e_decl, c_entry_decl, c_exit_decl;
 
   template<typename T, typename F>
   z3::sort toEnumSort(char const* sortName, std::string prefix, std::vector<T>& ids, F toStr, z3::func_decl_vector& cs);
+
+  void generateSs(std::vector<z3::expr>& vec);
+  void generateTs(std::vector<z3::expr>& vec);
 public:
-  Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen);
+  Z3Gen(const IdGenerator<VarId>& varGen, const IdGenerator<NodeId>& nodeGen, std::vector< std::pair<NodeId, NodeId> > sPairs, std::vector<NodeId> tNodes);
 
   z3::sort getVarSort() const;
   z3::sort getNodeIdSort() const;
@@ -45,6 +51,7 @@ public:
   z3::func_decl getSFuncDecl() const;
   z3::func_decl getCEntryFuncDecl() const;
   z3::func_decl getCExitFuncDecl() const;
+  z3::func_decl getEFuncDecl() const;
 
   z3::context* getContext();
 };
@@ -73,6 +80,7 @@ public:
   void visit(const C_Exit&);
   void visit(const S_Family&);
   void visit(const E_Family&);
+  void visit(const SingleVar&);
 };
 
 #endif

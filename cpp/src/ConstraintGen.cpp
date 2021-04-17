@@ -61,19 +61,24 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
 void ConstraintGenerator::handle(const BinaryOperator* b) {
   if (!b) return;
 
+  auto lhs = b->getLHS();
+  auto n = node(b);
+  auto m = node(b->getRHS());
+
   if (b->isAssignmentOp()) {
-    auto lhs = b->getLHS();
 
     if (DeclRefExpr::classof(lhs)) {
-      auto n = node(b);
-      auto m = node(b->getRHS());
 
       auto v = var(static_cast<const DeclRefExpr*>(lhs)->getFoundDecl());
 
       pushConstraint(new C_Exit(n), new SetIfThenElse(new PairIn(v, PUBLIC, new C_Entry(n)),
                                                       new SetUnionPair(new C_Entry(n), v, new SensT(m)),
                                                       new C_Entry(n)));
+      tNodes.push_back(m);
+      handle(b->getLHS());
     }
+  } else {
+    pushConstraint(new E_Family(n), new SetUnion(new E_Family(node(b->getLHS())), new E_Family(node(b->getRHS()))));
   }
 }
 
@@ -122,6 +127,19 @@ void ConstraintGenerator::handle(const VarDecl* d) {
   pushConstraint(new C_Exit(n), new SetUnionPair(new C_Entry(n), v, new SensAtom(PUBLIC)));
 }
 
+void ConstraintGenerator::handle(const Expr* e) {
+  auto n = node(e);
+
+  if (BinaryOperator::classof(e)) {
+    handle(static_cast<const BinaryOperator*>(e));
+  } else if (DeclRefExpr::classof(e)) {
+    auto v = var(static_cast<const DeclRefExpr*>(e)->getFoundDecl());
+
+    pushConstraint(new E_Family(n), new SingleVar(v));
+  } else {
+  }
+}
+
 ConstraintGenerator::ConstraintGenerator() {
 }
 
@@ -140,3 +158,7 @@ const SetConstraints& ConstraintGenerator::getConstraints() const { return const
 
 const IdGenerator<NodeId>& ConstraintGenerator::getNodeIdGen() const { return nodeIdGen; }
 const IdGenerator<VarId>& ConstraintGenerator::getVarIdGen() const { return varIdGen; }
+
+const std::vector< std::pair<NodeId, NodeId> >& ConstraintGenerator::getSPairs() const { return sPairs; }
+const std::vector<NodeId>& ConstraintGenerator::getTNodes() const { return tNodes; }
+
