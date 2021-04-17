@@ -22,8 +22,10 @@ string VarId::ppr() const { return std::to_string(id); }
 
 bool SetExpr::isEmptySet() const { return false; }
 bool SetExpr::isSingleVar() const { return false; }
+bool SetExpr::isAtom() const { return false; }
 
 bool SetExprAtom::isEmptySet() const { return false; }
+bool SetExprAtom::isAtom() const { return true; }
 
 //
 // EmptySet //

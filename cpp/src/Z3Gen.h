@@ -37,9 +37,9 @@ public:
   z3::sort getNodeIdSort() const;
   z3::sort getSensSort() const;
 
-  z3::expr generate(const SetConstraint& c);
+  z3::expr generate(SetConstraint c);
 
-  std::vector<z3::expr> generate(const SetConstraints& cs);
+  std::vector<z3::expr> generate(SetConstraints cs);
 
   void assertExprs(const std::vector<z3::expr>& es);
 

@@ -100,7 +100,7 @@ z3::sort Z3Gen::getVarSort() const { return varSort; }
 z3::sort Z3Gen::getNodeIdSort() const { return nodeIdSort; }
 z3::sort Z3Gen::getSensSort() const { return sensSort; }
 
-z3::expr Z3Gen::generate(const SetConstraint& c) {
+z3::expr Z3Gen::generate(SetConstraint c) {
   auto trueExpr = context.bool_val(true);
 
   switch (c.getLHS()->getKind()) {
@@ -141,13 +141,22 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
               !visitorLHS.getExpr()
             )
           );
-        } else {
-          auto m = node(static_cast<const E_Family*>(c.getRHS())->getArg());
+        } else if (c.getRHS()->isAtom() && static_cast<const SetExprAtom*>(c.getRHS())->getKind() == SF_E) {
+          /* auto m = node(static_cast<const E_Family*>(c.getRHS())->getArg()); */
 
-          Z3SetExprVisitor visitorRHS(*this, m, v, s_);
+          /* Z3SetExprVisitor visitorRHS(*this, m, v, s_); */
+          Z3SetExprVisitor visitorRHS(*this, n, v, s_);
           c.getRHS()->accept(visitorRHS);
           auto rhsExpr = visitorRHS.getExpr();
           return z3::forall(v, e_decl(n, v) == rhsExpr);
+        } else {
+          Z3SetExprVisitor visitorRHS(*this, n, v, s_);
+          c.getRHS()->accept(visitorRHS);
+          auto rhsExpr = visitorRHS.getExpr();
+          return z3::forall(v, e_decl(n, v) == rhsExpr);
+          /* std::cerr << "*** rhs not SF_E" << std::endl; */
+          /* throw std::exception(); */
+          /* exit(2); */
         }
 
         /* auto r = z3::forall(v, e_decl(n, v) == rhsExpr); */
@@ -160,7 +169,7 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
   }
 }
 
-std::vector<z3::expr> Z3Gen::generate(const SetConstraints& cs) {
+std::vector<z3::expr> Z3Gen::generate(SetConstraints cs) {
   std::vector<z3::expr> r;
 
   for (auto it = cs.begin(); it != cs.end(); ++it) {
@@ -249,8 +258,12 @@ void Z3SetExprVisitor::visit(const SensT& t) {
 }
 
 void Z3SetExprVisitor::visit(const SetUnion& u) {
+  auto oldExpr = expr;
+
   u.getLHS()->accept(*this);
   auto lhsExpr = expr;
+
+  expr = oldExpr;
 
   u.getRHS()->accept(*this);
   auto rhsExpr = expr;

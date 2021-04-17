@@ -76,6 +76,7 @@ public:
 
   virtual bool isEmptySet() const;
   virtual bool isSingleVar() const;
+  virtual bool isAtom() const;
 };
 
 class SetExprAtom : public SetExpr
@@ -83,6 +84,7 @@ class SetExprAtom : public SetExpr
 public:
   virtual SetExprAtomKind getKind() const = 0;
   bool isEmptySet() const;
+  bool isAtom() const;
 };
 
 class C_Entry : public SetExprAtom
@@ -338,6 +340,7 @@ T IdGenerator<T>::getId(int64_t i) {
     id.id = uniq;
 
     ids[i] = id;
+    /* std::cout << "uniq = " << uniq << std::endl; */
     ++uniq;
   } else {
     id = it->second;
