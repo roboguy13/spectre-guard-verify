@@ -48,7 +48,7 @@ int main(int argc, const char **argv) {
 
   llvm::errs() << pprSetConstraints(gen.getConstraints());
 
-  try {
+  /* try { */
     Z3Gen z3Gen(gen.getVarIdGen(), gen.getNodeIdGen(), gen.getSPairs(), gen.getTNodes());
 
     auto exprs = z3Gen.generate(gen.getConstraints());
@@ -58,10 +58,11 @@ int main(int argc, const char **argv) {
       std::cout << *it << "\n";
     }
     z3Gen.assertExprs(exprs);
-  } catch (z3::exception e) {
-    std::cerr << "Z3 exception: " << e.msg() << std::endl;
-    return 1;
-  }
+  /* } catch (z3::exception e) { */
+  /*   std::cerr << "Z3 exception: " << e.msg() << std::endl; */
+  /*   throw e; */
+  /*   return 1; */
+  /* } */
 
 
   return r;

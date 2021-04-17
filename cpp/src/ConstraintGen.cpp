@@ -57,13 +57,12 @@ void ConstraintGenerator::handleCasted(const T* x) {
   NodeId n2 = node(static_cast<const S*>(x));
   handle(static_cast<const S*>(x));
   if (n1.id != n2.id) {
-    /* merge(n1, n2); */
     connect(n2, n1);
   }
 }
 
 void ConstraintGenerator::connect(NodeId x, NodeId y) {
-  cerr << "\t" << x.id << " -----> " << y.id << "\n";
+  /* cerr << "\t" << x.id << " -----> " << y.id << "\n"; */
   pushConstraint(new C_Entry(y), new C_Exit(x));
 }
 
@@ -148,6 +147,38 @@ void ConstraintGenerator::handle(const BinaryOperator* b) {
 
 void ConstraintGenerator::handle(const IfStmt* stmt) {
   if (!stmt) return;
+
+  pushConstraint(new C_Entry(node(stmt->getCond())), new C_Entry(node(stmt)));
+  handle(stmt->getCond());
+
+  handle(stmt->getThen());
+  pushConstraint(new C_Entry(node(stmt->getThen())), new C_Entry(node(stmt)));
+
+  if (stmt->getElse()) {
+    handle(stmt->getElse());
+    pushConstraint(new C_Entry(node(stmt->getElse())), new C_Entry(node(stmt)));
+  }
+
+  pushConstraint(
+      new C_Exit(node(stmt)),
+      new SetUnion(
+        new C_Entry(node(stmt)),
+        new SetIfThenElse(new SensEqual(new SensT(node(stmt)), new SensAtom(SECRET)),
+          maybeUnion(new S_Family(node(stmt), node(stmt->getThen())), stmt->getElse(), [this, stmt](auto x) { return new S_Family(node(stmt), node(x)); }),
+          maybeUnion(new C_Exit(node(stmt->getThen())), stmt->getElse(), [this](auto x) { return new C_Exit(node(x)); })
+          )
+        ));
+
+  pushConstraint(new E_Family(node(stmt)), new E_Family(node(stmt->getCond())));
+}
+
+template<typename T, typename F>
+SetExpr* ConstraintGenerator::maybeUnion(SetExpr* x, T* y, F f) {
+  if (!y) {
+    return x;
+  } else {
+    return new SetUnion(x, f(y));
+  }
 }
 
 void ConstraintGenerator::handle(const DeclRefExpr* dre) {

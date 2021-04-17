@@ -39,6 +39,9 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   void handle(const clang::ImplicitCastExpr* e);
   void handle(const clang::DeclRefExpr* dre);
 
+  template<typename T, typename F>
+  SetExpr* maybeUnion(SetExpr* x, T* y, F f);
+
   template<typename S, typename T>
   void handleCasted(const T* x);
 
