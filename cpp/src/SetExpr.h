@@ -34,14 +34,12 @@ enum ConditionKind
 
 struct NodeId
 {
-  clang::SourceLocation srcLoc;
   int id;
 
   std::string ppr() const;
 };
 
 struct VarId {
-  clang::SourceLocation srcLoc;
   int id;
 
   std::string ppr() const;
@@ -57,12 +55,12 @@ template<typename T>
 class IdGenerator
 {
   int uniq;
-  std::map<clang::SourceLocation, T> ids;
+  std::map<int64_t, T> ids;
 public:
   IdGenerator();
 
-  T getId(clang::SourceLocation);
-  T getIdByUniq(int id) const;
+  T getId(int64_t id);
+  T getIdByUniq(int i) const;
 
   std::vector<T> getIds() const;
 };
@@ -332,15 +330,14 @@ template<typename T>
 IdGenerator<T>::IdGenerator() : uniq(0) { }
 
 template<typename T>
-T IdGenerator<T>::getId(clang::SourceLocation srcLoc) {
-  auto it = ids.find(srcLoc);
+T IdGenerator<T>::getId(int64_t i) {
+  auto it = ids.find(i);
   T id;
 
   if (it == ids.end()) {
-    id.srcLoc = srcLoc;
     id.id = uniq;
 
-    ids[srcLoc] = id;
+    ids[i] = id;
     ++uniq;
   } else {
     id = it->second;

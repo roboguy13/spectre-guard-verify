@@ -28,12 +28,17 @@ using namespace llvm;
 
 template<typename T>
 NodeId ConstraintGenerator::node(const T* x) {
-  return nodeIdGen.getId(x->getBeginLoc());
+  return nodeIdGen.getId(x->getID());
+}
+
+template<typename T>
+NodeId ConstraintGenerator::node1(const T* x) {
+  return nodeIdGen.getId(x->getID(*result->Context));
 }
 
 template<typename T>
 VarId ConstraintGenerator::var(const T* x) {
-  return varIdGen.getId(x->getSourceRange().getBegin());
+  return varIdGen.getId(x->getID());
 }
 
 void ConstraintGenerator::pushConstraint(SetExprAtom* lhs, SetExpr* rhs) {
@@ -52,7 +57,7 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
   } else if (DeclStmt::classof(stmt)) {
     handle(static_cast<const DeclStmt*>(stmt));
   } else {
-    NodeId n = node(stmt);
+    NodeId n = node1(stmt);
 
     pushConstraint(new C_Exit(n), new C_Entry(n));
   }
@@ -62,8 +67,8 @@ void ConstraintGenerator::handle(const BinaryOperator* b) {
   if (!b) return;
 
   auto lhs = b->getLHS();
-  auto n = node(b);
-  auto m = node(b->getRHS());
+  auto n = node1(b);
+  auto m = node1(b->getRHS());
 
   if (b->isAssignmentOp()) {
 
@@ -75,11 +80,12 @@ void ConstraintGenerator::handle(const BinaryOperator* b) {
                                                       new SetUnionPair(new C_Entry(n), v, new SensT(m)),
                                                       new C_Entry(n)));
       tNodes.push_back(m);
-      handle(b->getLHS());
     }
   } else {
-    pushConstraint(new E_Family(n), new SetUnion(new E_Family(node(b->getLHS())), new E_Family(node(b->getRHS()))));
+    pushConstraint(new E_Family(n), new SetUnion(new E_Family(node1(b->getLHS())), new E_Family(node1(b->getRHS()))));
   }
+  handle(b->getRHS());
+  handle(b->getLHS());
 }
 
 void ConstraintGenerator::handle(const IfStmt* stmt) {
@@ -93,7 +99,7 @@ void ConstraintGenerator::handle(const CompoundStmt* cs) {
     if (const Stmt* last = *(cs->body_begin())) {
       handle(last);
       for (auto it = cs->body_begin()+1; it != cs->body_end(); ++it) {
-        pushConstraint(new C_Entry(node(*it)), new C_Exit(node(last)));
+        pushConstraint(new C_Entry(node1(*it)), new C_Exit(node1(last)));
         handle(*it);
         last = *it;
       }
@@ -128,7 +134,7 @@ void ConstraintGenerator::handle(const VarDecl* d) {
 }
 
 void ConstraintGenerator::handle(const Expr* e) {
-  auto n = node(e);
+  auto n = node1(e);
 
   if (BinaryOperator::classof(e)) {
     handle(static_cast<const BinaryOperator*>(e));
@@ -140,18 +146,25 @@ void ConstraintGenerator::handle(const Expr* e) {
   }
 }
 
-ConstraintGenerator::ConstraintGenerator() {
-}
+/* ConstraintGenerator::ConstraintGenerator(ASTContext& context) : context(context) { */
+/* } */
 
 void ConstraintGenerator::run(const clang::ast_matchers::MatchFinder::MatchResult &result) {
+  this->result = &result;
   if (const FunctionDecl* f = result.Nodes.getNodeAs<FunctionDecl>("functionDecl")) {
+    if (f->hasBody()) {
+      entryNodes.push_back(node(f));
+    }
     handle(f->getBody());
   }
 }
 
 void ConstraintGenerator::finalizeConstraints() {
-  auto n = nodeIdGen.getIdByUniq(0);
-  pushConstraint(new C_Entry(n), new EmptySet());
+  for (auto it = entryNodes.begin(); it != entryNodes.end(); ++it) {
+    pushConstraint(new C_Entry(*it), new EmptySet());
+  }
+  /* auto n = nodeIdGen.getId(0); */
+  /* pushConstraint(new C_Entry(n), new EmptySet()); */
 }
 
 const SetConstraints& ConstraintGenerator::getConstraints() const { return constraints; }

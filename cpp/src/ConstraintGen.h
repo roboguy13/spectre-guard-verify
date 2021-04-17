@@ -19,10 +19,15 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   IdGenerator<NodeId> nodeIdGen;
   IdGenerator<VarId>  varIdGen;
 
+  std::vector<NodeId> entryNodes;
+
   void pushConstraint(SetExprAtom*, SetExpr*);
 
   template<typename T>
   NodeId node(const T* t);
+
+  template<typename T>
+  NodeId node1(const T* t);
 
   template<typename T>
   VarId var(const T* t);
@@ -37,8 +42,10 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
 
   std::vector< std::pair<NodeId, NodeId> > sPairs;
   std::vector<NodeId> tNodes;
+
+  const clang::ast_matchers::MatchFinder::MatchResult* result;
 public:
-  ConstraintGenerator();
+  /* ConstraintGenerator(); */
 
   void run(const clang::ast_matchers::MatchFinder::MatchResult &Result);
 
