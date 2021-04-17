@@ -63,6 +63,12 @@ void ConstraintGenerator::handle(const Stmt* stmt) {
   }
 }
 
+void ConstraintGenerator::handle(const ImplicitCastExpr* e) {
+  auto e2 = e->getSubExprAsWritten();
+  pushConstraint(new E_Family(node1(e)), new E_Family(node1(e2)));
+  handle(e2);
+}
+
 void ConstraintGenerator::handle(const BinaryOperator* b) {
   if (!b) return;
 
@@ -142,7 +148,10 @@ void ConstraintGenerator::handle(const Expr* e) {
     auto v = var(static_cast<const DeclRefExpr*>(e)->getFoundDecl());
 
     pushConstraint(new E_Family(n), new SingleVar(v));
+  } else if (ImplicitCastExpr::classof(e)) {
+    handle(static_cast<const ImplicitCastExpr*>(e));
   } else {
+    std::cerr << "handle else\n";
   }
 }
 

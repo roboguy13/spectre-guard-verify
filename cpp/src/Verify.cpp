@@ -35,7 +35,9 @@ int main(int argc, const char **argv) {
   auto matcher = ast_matchers::functionDecl().bind("functionDecl");
   ast_matchers::MatchFinder finder;
 
-  finder.addMatcher(matcher, &gen);
+
+  finder.addMatcher(ast_matchers::traverse(TK_IgnoreUnlessSpelledInSource, matcher), &gen);
+
 
 
   int r = tool.run(newFrontendActionFactory(&finder).get());

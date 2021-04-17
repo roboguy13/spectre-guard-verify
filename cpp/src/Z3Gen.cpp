@@ -122,7 +122,9 @@ z3::expr Z3Gen::generate(const SetConstraint& c) {
             )
           );
         } else {
-          Z3SetExprVisitor visitorRHS(*this, n, v, s_);
+          auto m = node(static_cast<const E_Family*>(c.getRHS())->getArg());
+
+          Z3SetExprVisitor visitorRHS(*this, m, v, s_);
           c.getRHS()->accept(visitorRHS);
           auto rhsExpr = visitorRHS.getExpr();
           return z3::forall(v, e_decl(n, v) == rhsExpr);

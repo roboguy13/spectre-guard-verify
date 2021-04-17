@@ -39,6 +39,7 @@ class ConstraintGenerator : public clang::ast_matchers::MatchFinder::MatchCallba
   void handle(const clang::DeclStmt*);
   void handle(const clang::VarDecl*);
   void handle(const clang::Expr* e);
+  void handle(const clang::ImplicitCastExpr* e);
 
   std::vector< std::pair<NodeId, NodeId> > sPairs;
   std::vector<NodeId> tNodes;
