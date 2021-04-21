@@ -13,6 +13,8 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes #-}
 
 -- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
@@ -564,8 +566,7 @@ gccPath = "/usr/bin/gcc"
 
 main :: IO ()
 main = do
-  -- let fileName = "../test.c"
-  let fileName = "/Users/david/cat.c"
+  let fileName = "../test.c"
 
   let gcc = GCC_NoIncludes gccPath
 
