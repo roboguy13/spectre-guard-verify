@@ -52,6 +52,10 @@ import           Ppr
 import           SetExpr
 import           ConstraintGen
 
+infixl 4 <!>
+(<!>) :: Monad m => m (a -> m b) -> m a -> m b
+f <!> x = join (f <*> x)
+
 generateUnsatCores :: Bool
 generateUnsatCores = True
 
@@ -165,11 +169,11 @@ consistentSensitivity nodeIds f = do
     (_, s'_sym, s') <- mkSymVar "s'" Sens_Sort
 
     mkForallConst [] [v_sym, s_sym, s'_sym]
-      =<< join
-        (mkIte <$> (z3M mkAnd [join (mkEq <$> applySetRelation (f n) [v, s] <*> pure true)
-                              ,join (mkEq <$> applySetRelation (f n) [v, s'] <*> pure true)])
+      =<<
+        (mkIte <$> (z3M mkAnd [mkEq <$> applySetRelation (f n) [v, s]  <!> pure true
+                              ,mkEq <$> applySetRelation (f n) [v, s'] <!> pure true])
                <*> mkEq s s'
-               <*> mkEq true true
+               <!> mkEq true true
         )))
 
 generateS's :: [(NodeId, NodeId)] -> Z3Converter ()
@@ -179,14 +183,14 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
 
   forM_ sPairs $ \(m, n) ->
     assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
-      public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
+      secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+      public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
 
-      join $ mkIte <$> applySetRelation (C_Entry' n) vars
-                   <*> join (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
-                                   <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <*> mkTrue)
-                                   <*> join (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <*> mkTrue))
-                   <*> join (mkEq <$> mkTrue <*> mkTrue))
+      mkIte <$> applySetRelation (C_Entry' n) vars
+                   <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
+                              <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
+                              <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
+                   <!> (mkEq <$> mkTrue <!> mkTrue))
 
   let ms = Set.toList (Set.fromList (map fst sPairs))
 
@@ -203,18 +207,18 @@ generateT's tNodes = do
 
     (_, v'_sym, v'_var) <- mkSymVar "v'" Var_Sort
 
-    secret <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <*> pure []
-    public <- join $ mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <*> pure []
+    secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+    public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
     sens_t <- lookupZ3FuncDecl (Sens_T n)
-    n_z3 <- join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
+    n_z3 <- mkApp <$> lookupZ3FuncDecl n <!> pure []
 
     assert =<<
-      join (mkIte <$> z3M mkOr
-                           [join (mkForallConst [] [v'_sym] <$> (mkNot =<< (applySetRelation (Atom_E' n) [v'_var])))
-                           ,join (mkForallConst [] [v_sym] <$> join (mkImplies <$> (applySetRelation (Atom_E' n) [v_var]) <*> (applySetRelation (C_Entry n) [v_var, public])))
-                           ]
-                  <*> join (mkEq <$> (mkApp sens_t []) <*> pure public)
-                  <*> join (mkEq <$> (mkApp sens_t []) <*> pure secret))
+      mkIte <$> z3M mkOr
+                     [mkForallConst [] [v'_sym] =<< (mkNot =<< (applySetRelation (Atom_E' n) [v'_var]))
+                     ,mkForallConst [] [v_sym] =<< (mkImplies <$> (applySetRelation (Atom_E' n) [v_var]) <!> (applySetRelation (C_Entry n) [v_var, public]))
+                     ]
+            <*> (mkEq <$> (mkApp sens_t []) <!> pure public)
+            <!> (mkEq <$> (mkApp sens_t []) <!> pure secret)
 
 correctnessCondition :: [NodeId] -> Z3Converter ()
 correctnessCondition nodeIds = do
@@ -224,7 +228,7 @@ correctnessCondition nodeIds = do
 evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
   params <- mkParams
-  join (paramsSetBool params <$> mkStringSymbol "core.minimize" <*> pure True)
+  paramsSetBool params <$> mkStringSymbol "core.minimize" <!> pure True
   solverSetParams params
 
   z3Info <- defineZ3Names vars nodeIds
@@ -365,7 +369,7 @@ instance Z3SetRelation (SetExpr a) where
 
     eql <- mkEq z3_sensX z3_sensY
 
-    join $ mkIte eql <$> applySetRelation t args <*> applySetRelation f args
+    mkIte eql <$> applySetRelation t args <!> applySetRelation f args
 
   applySetRelation (SE_IfThenElse (PairIn (v, s) x) t f) args = do
     z3_v <- toZ3 v
@@ -373,7 +377,7 @@ instance Z3SetRelation (SetExpr a) where
 
     cond <- applySetRelation x [z3_v, z3_s]
 
-    join $ mkIte cond <$> applySetRelation t args <*> applySetRelation f args
+    mkIte cond <$> applySetRelation t args <!> applySetRelation f args
 
   applySetRelation SE_Empty _args = error "applySetRelation: SE_Empty"
 
@@ -404,17 +408,17 @@ mkSymVar name z3sort = do
   return (sort, app, var)
 
 instance ToZ3 NodeId where
-  toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
+  toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Int where
-  toZ3 n = join $ mkApp <$> lookupZ3FuncDecl n <*> pure []
+  toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Sensitivity where
   toZ3 = toZ3 . SensAtom
 
 instance ToZ3 SensExpr where
   toZ3 s@(SensAtom _) =
-    join $ mkApp <$> (lookupZ3FuncDecl s) <*> pure []
+    mkApp <$> (lookupZ3FuncDecl s) <!> pure []
 
   toZ3 s@(Sens_T x) = do
     z3_t <- lookupZ3FuncDecl s
@@ -424,43 +428,40 @@ instance ToZ3 SensExpr where
 instance ToZ3 SetConstraint where
   toZ3 (lhs :=: SE_Empty) = do
     forallQuantifyFreeVars lhs $ \vars -> do
-      join $ mkEq <$> applySetRelation lhs vars <*> mkFalse
+      mkEq <$> applySetRelation lhs vars <!> mkFalse
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v0)) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
     z3_v0 <- toZ3 v0
 
     mkForallConst [] [v_sym]
-      =<< join (mkIte <$> mkEq z3_v0 v_var
-                      <*> join (mkEq <$> applySetRelation lhs [v_var] <*> mkTrue)
-                      <*> join (mkEq <$> applySetRelation lhs [v_var] <*> mkFalse))
-    -- z3_v <- (`mkApp` []) =<< lookupZ3FuncDecl v
-
-    -- join $ mkEq <$> applySetRelation lhs [z3_v] <*> mkTrue
+      =<< mkIte <$> mkEq z3_v0 v_var
+                <*> (mkEq <$> applySetRelation lhs [v_var] <!> mkTrue)
+                <!> (mkEq <$> applySetRelation lhs [v_var] <!> mkFalse)
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SetFamily x)) =
     forallQuantifyFreeVars lhs $ \vars ->
-      join (mkEq <$> applySetRelation lhs vars <*> applySetRelation x vars)
+      (mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars)
 
   toZ3 (lhs@(Atom_E' _) :=: SE_UnionSingle {}) = error "Assignment of E to a singleton of a variable/sensitivity pair"
 
   toZ3 (lhs@(Atom_E' _) :=: SE_Union x y) =
     forallQuantifyFreeVars lhs $ \vars -> do
       the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
-      join (mkEq <$> applySetRelation lhs vars <*> pure the_or)
+      mkEq <$> applySetRelation lhs vars <!> pure the_or
 
 
 
   toZ3 (lhs :=: SE_Atom (SetFamily x)) =
     forallQuantifyFreeVars lhs $ \vars ->
-      join (mkEq <$> applySetRelation lhs vars <*> applySetRelation x vars)
+      mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars
 
   toZ3 (_ :=: SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
 
   toZ3 (lhs :=: SE_Union x y) =
     forallQuantifyFreeVars lhs $ \vars -> do
       the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
-      join (mkEq <$> applySetRelation lhs vars <*> pure the_or)
+      mkEq <$> applySetRelation lhs vars <!> pure the_or
 
   toZ3 (lhs :=: SE_UnionSingle x v0 s0) = do
 
@@ -469,9 +470,9 @@ instance ToZ3 SetConstraint where
     let vs = [v_var, s_var]
 
     mkForallConst [] [v_sym, s_sym]
-      =<< join (mkIte <$> z3M mkAnd [join (mkEq v_var <$> toZ3 v0), join (mkEq s_var <$> toZ3 s0)]
-                      <*> join (mkEq <$> applySetRelation lhs vs <*> mkTrue)
-                      <*> join (mkEq <$> applySetRelation lhs vs <*> applySetRelation x vs))
+      =<< (mkIte <$> z3M mkAnd [mkEq v_var =<< toZ3 v0, mkEq s_var =<< toZ3 s0]
+                 <*> (mkEq <$> applySetRelation lhs vs <!> mkTrue)
+                 <!> (mkEq <$> applySetRelation lhs vs <!> applySetRelation x vs))
 
   toZ3 (lhs :=: SE_IfThenElse (SensEqual sensX sensY) t f) = do
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
@@ -487,13 +488,14 @@ instance ToZ3 SetConstraint where
     z3_f <- applySetRelation f vs
 
     mkForallConst [] [v_sym, s_sym]
-      =<< join (mkIte eql <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
+      =<< (mkIte eql <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
+                     <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
 
   toZ3 (lhs :=: SE_IfThenElse (PairIn (v, s) x) t f) = do
 
     z3_v <- toZ3 v
     z3_s <- toZ3 s
-    
+
     cond <- applySetRelation x [z3_v, z3_s]
 
     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
@@ -504,7 +506,8 @@ instance ToZ3 SetConstraint where
     z3_f <- applySetRelation f vs
 
     mkForallConst [] [v_sym, s_sym]
-      =<< join (mkIte cond <$> join (mkEq <$> applySetRelation lhs vs <*> pure z3_t) <*> join (mkEq <$> applySetRelation lhs vs <*> pure z3_f))
+      =<< (mkIte cond <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
+                      <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
 
 constraintsToZ3 :: SetConstraints -> Z3Converter ()
 constraintsToZ3 cs = do
