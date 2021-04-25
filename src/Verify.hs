@@ -24,7 +24,6 @@ import           Language.C.System.GCC
 import           Language.C.Data.Ident
 
 import           System.FilePath.Posix
-import           System.Cmd
 import           System.Process
 
 import           Z3.Monad
@@ -182,15 +181,18 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
   true <- mkTrue
 
   forM_ sPairs $ \(m, n) ->
-    assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
-      public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
+    -- let rhs = 
+    -- in
+    undefined
+    -- assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
+      -- secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+      -- public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
 
-      mkIte <$> applySetRelation (C_Entry' n) vars
-                   <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
-                              <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
-                              <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
-                   <!> (mkEq <$> mkTrue <!> mkTrue))
+      -- mkIte <$> applySetRelation (C_Entry' n) vars
+      --              <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
+      --                         <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
+      --                         <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
+      --              <!> (mkEq <$> mkTrue <!> mkTrue))
 
   let ms = Set.toList (Set.fromList (map fst sPairs))
 
@@ -595,16 +597,8 @@ main = do
 
           putStrLn $ ppr constraints
 
-          -- putStrLn (nodeIdLocInfo nodeLocs)
-
-          -- print parsed'
-
           let tPairs = getTNodes constraints
               sPairs = getSPairs constraints
-          -- let sPairs = tPairs `Set.union` getSPairs constraints
-
-          -- print sPairs
-          -- print tPairs
 
           (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
                                                  (Set.toList theNodeIds)

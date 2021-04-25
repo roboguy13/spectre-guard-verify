@@ -8,6 +8,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE QuantifiedConstraints #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
@@ -16,6 +22,10 @@ module SetExpr where
 import           Control.Monad.State
 
 import           Data.Data
+import           Data.Kind
+import           Data.Proxy
+import           Data.Type.Bool
+import           Data.Constraint
 
 import           Ppr
 
@@ -55,11 +65,58 @@ instance Ppr SensExpr where
   ppr (SensAtom x) = ppr x
   ppr (Sens_T x) = "T(" ++ ppr x ++ ")"
 
+type family In' x y where
+  In' x (x : xs) = True
+  In' x (y : xs) = In' x xs
+  In' x '[] = False
+
+type In x y = In' x y ~ True
+
+type family Subset' xs ys where
+  Subset' '[] ys = True
+  Subset' (x:xs) ys = (x `In'` ys) && Subset' xs ys
+
+type Subset xs ys = Subset' xs ys ~ True
+
+type family Append xs ys where
+  Append xs '[] = xs
+  Append '[] ys = ys
+  Append (x:xs) ys = x : Append xs ys
+
+type family PairToList xs where
+  PairToList (x, y) = Append (PairToList x) (PairToList y)
+  PairToList x = (x : '[])
+
+type family ListToPairs xs where
+  ListToPairs (x : '[]) = x
+  ListToPairs (x : xs) = (x, ListToPairs xs)
+
+-- data DslVar dummy (a :: [Type]) where
+data DslVar dummy a where
+  DslVar :: dummy -> DslVar dummy a
+  DslVar_Value :: a -> DslVar dummy a
+  DslVar_Pair :: (DslVar dummy a, DslVar dummy b) -> DslVar dummy (a, b)
+  -- DslVar_Value :: a -> DslVar dummy '[a]
+  -- DslVar_Pair :: (a `Subset` xs, b `Subset` xs) => (DslVar dummy a, DslVar dummy b) -> DslVar dummy xs
+
+data SetComprehension freeVars where
+  SetComp' :: NameFreeVars freeVars => (forall dummy. DslVar dummy freeVars -> (DslVar dummy freeVars, CompPred (PairToList freeVars))) -> SetComprehension (PairToList freeVars)
+
+-- data CompExpr freeVars where
+--   CompExpr_Sens :: DslVar '[Sensitivity] -> CompExpr '[Sensitivity]
+--   CompExpr_Pair :: DslVar '[Var, Sensitivity] -> CompExpr (Var, Sensitivity)
+
+data CompPred freeVars where
+  CompPred_PairIn :: (Var, Sensitivity) -> SetFamily freeVars -> CompPred '[Var, Sensitivity]
+  CompPred_VarIn  :: Var -> SetFamily '[Var] -> CompPred '[Var]
+  CompPred_And :: CompPred freeVarsA -> CompPred freeVarsB -> CompPred (Append freeVarsA freeVarsB)
+
+data LatticeOp where
+  LatticeJoin' :: () => SetComprehension freeVars -> LatticeOp
+
 data SetConstraint =
   forall freeVars.
-      -- freeVarsLHS `Sublist` freeVarsRHS ~ True =>
-        SetFamily freeVars :=: SetExpr freeVars
-  -- deriving (Show)
+    SetFamily freeVars :=: SetExpr freeVars
 
 instance Ppr SetConstraint where
   ppr (x :=: y) = ppr x ++ " = " ++ ppr y
@@ -74,11 +131,78 @@ data SetExpr (freeVars :: [*]) where
   SE_UnionSingle :: SetExpr freeVars -> Int -> SensExpr -> SetExpr freeVars
   SE_IfThenElse :: Condition -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_Empty :: SetExpr freeVars
-  -- deriving (Show)
+   -- Set comprehension:
+  SE_Comp :: () => SetComprehension freeVars -> SetExpr freeVars
+  SE_LatticeOp :: LatticeOp -> SetExpr '[]
+
+pattern SetComp x = SE_Comp (SetComp' x)
+pattern LatticeJoin x = SE_LatticeOp (LatticeJoin' x)
 
 instance Ppr Condition where
   ppr (SensEqual x y) = ppr x <> " = " <> ppr y
-  ppr (PairIn (x, s) y) = "(" <> show x <> ", " <> ppr s <> ") in " <> ppr y
+  ppr (PairIn p y) = ppr p <> " in " <> ppr y
+
+instance Ppr (CompPred freeVars) where
+  ppr (CompPred_PairIn p sf) = ppr p <> " in " <> ppr sf
+  ppr (CompPred_VarIn v sf)  = show v <> " in " <> ppr sf
+  ppr (CompPred_And x y)     = ppr x <> " \\/ " <> ppr y
+
+instance Ppr Var where
+  ppr v = show v
+
+-- instance Ppr (SetComprehension freeVars) where
+--   ppr (SetComp' x p) = "{ " <> ppr x <> " | " <> ppr p <> " }"
+
+instance Ppr LatticeOp where
+  ppr (LatticeJoin' x) = "U" <> ppr x
+
+-- | For use in pretty printing
+class NameFreeVars freeVars where
+  nameFreeVars :: proxy freeVars -> DslVar String (ListToPairs freeVars)
+  -- nameFreeVars :: proxy (PairToList freeVars) -> DslVar String freeVars
+
+-- instance NameFreeVars '[Var, Sensitivity] where
+--   nameFreeVars _ = DslVar_Pair (DslVar @_ @'[Var] "v", DslVar @_ @'[Sensitivity] "s")
+
+-- instance NameFreeVars '[Sensitivity] where
+--   nameFreeVars _ = DslVar "s"
+
+type family PprList xs :: Constraint where
+  PprList '[] = ()
+  PprList (x : xs) = (Ppr x, PprList xs)
+
+-- class x `In` xs => InC x xs
+-- instance x `In` xs => InC x xs
+
+-- type PprList xs = forall x. (x `InC` xs) :=> Ppr x
+
+instance Ppr a => Ppr (DslVar String a) where
+  ppr (DslVar str) = str
+  ppr (DslVar_Value v) = ppr v
+
+instance (Ppr a, Ppr b) => Ppr (DslVar String (a, b)) where
+  ppr (DslVar str) = str
+  ppr (DslVar_Value v) = ppr v
+  ppr (DslVar_Pair p) = ppr p
+
+instance (Ppr a, Ppr b) => Ppr (a, b) where
+  ppr (x, y) = "(" <> ppr x <> ", " <> ppr y <> ")"
+
+-- instance PprList freeVars => Ppr (DslVar String freeVars) where
+  -- ppr (DslVar str) = str
+  -- ppr (DslVar_Value v) = ppr v
+  -- ppr (DslVar_Pair (x, y)) = "(" <> ppr x <> ", " <> ppr y <> ")"
+
+-- instance forall freeVars. PprList freeVars => -- (forall x. (x `In` freeVars) :=> Ppr x) =>
+--   Ppr (DslVar String freeVars) where
+--     ppr (DslVar str) = str
+--     ppr (DslVar_Value v) = undefined --ppr v
+
+instance (PprList freeVars) => Ppr (SetComprehension freeVars) where
+  ppr sc@(SetComp' f) =
+    let (x, p) = f (nameFreeVars (Proxy @freeVars)) --sc)
+    in
+    "{ " <> ppr x <> " | " <> ppr p <> " }"
 
 instance Ppr (SetExpr freeVars) where
   ppr (SE_Atom x) = ppr x
@@ -86,6 +210,8 @@ instance Ppr (SetExpr freeVars) where
   ppr (SE_UnionSingle x v s) = ppr x ++ " U {(" ++ show v ++ ", " ++ ppr s ++ ")}"
   ppr (SE_IfThenElse cond t f) = "if (" ++ ppr cond ++ ") then " ++ ppr t ++ " else " ++ ppr f
   ppr SE_Empty = "{}"
+  ppr (SE_Comp x) = ppr x
+  ppr (SE_LatticeOp x) = ppr x
 
 type SetConstraints = [SetConstraint]
 
@@ -122,6 +248,24 @@ instance ExprConstNames Condition where
 
   getTNodes (SensEqual x y) = getTNodes x <> getTNodes y
   getTNodes (PairIn _x y) = getTNodes y
+
+-- instance ExprConstNames (CompPred freeVars) where
+--   getVars (CompPred_PairIn _p sf) = getVars sf
+--   getVars (CompPred_VarIn  _v sf) = getVars sf
+--   getVars (CompPred_And x y)      = getVars x <> getVars y
+
+--   getSPairs (CompPred_PairIn _ sf) = getSPairs sf
+--   getSPairs (CompPred_VarIn _ sf)  = getSPairs sf
+--   getSPairs (CompPred_And x y) = getSPairs x <> getSPairs y
+
+--   getTNodes (CompPred_PairIn _ sf) = getTNodes sf
+--   getTNodes (CompPred_VarIn _ sf)  = getTNodes sf
+--   getTNodes (CompPred_And x y) = getTNodes x <> getTNodes y
+
+-- instance ExprConstNames (CompExpr freeVars) where
+--   getVars _ = mempty
+--   getVars _ = mempty
+--   get
 
 instance ExprConstNames SensExpr where
   getVars _ = mempty
