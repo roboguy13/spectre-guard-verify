@@ -240,7 +240,7 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
   case (generateS's sPairs, generateT's tNodes, correctnessCondition nodeIds) of
     (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter correctnessCondition) -> do
       str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> correctnessCondition >> solverToString) z3Info
-      liftIO $ hPutStrLn stderr str
+      -- liftIO $ hPutStrLn stderr str
       check
       (r, model) <- getModel
       modelOrCore <- case model of
