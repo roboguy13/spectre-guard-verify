@@ -25,6 +25,7 @@ import           Language.C.Data.Ident
 
 import           System.FilePath.Posix
 import           System.Process
+import           System.IO
 
 import           Z3.Monad
 
@@ -50,6 +51,7 @@ import           Orphans ()
 import           Ppr
 import           SetExpr
 import           ConstraintGen
+import           DOT
 
 infixl 4 <!>
 (<!>) :: Monad m => m (a -> m b) -> m a -> m b
@@ -183,16 +185,16 @@ generateS's sPairs@((firstPairA, firstPairB):_) = do
   forM_ sPairs $ \(m, n) ->
     -- let rhs = 
     -- in
-    undefined
-    -- assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      -- secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
-      -- public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
+    -- undefined
+    assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
+      secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+      public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
 
-      -- mkIte <$> applySetRelation (C_Entry' n) vars
-      --              <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
-      --                         <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
-      --                         <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
-      --              <!> (mkEq <$> mkTrue <!> mkTrue))
+      mkIte <$> applySetRelation (C_Entry' n) vars
+                   <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
+                              <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
+                              <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
+                   <!> (mkEq <$> mkTrue <!> mkTrue))
 
   let ms = Set.toList (Set.fromList (map fst sPairs))
 
@@ -238,7 +240,7 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
   case (generateS's sPairs, generateT's tNodes, correctnessCondition nodeIds) of
     (Z3Converter generateS's_Z3, Z3Converter generateT's_Z3, Z3Converter correctnessCondition) -> do
       str <- flip evalStateT 0 $ runReaderT (generateS's_Z3 >> generateT's_Z3 >> conv >> correctnessCondition >> solverToString) z3Info
-      -- liftIO $ putStrLn str
+      liftIO $ hPutStrLn stderr str
       check
       (r, model) <- getModel
       modelOrCore <- case model of
@@ -595,7 +597,8 @@ main = do
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
               theNodeIds = getNodeIds constraints
 
-          putStrLn $ ppr constraints
+          -- putStrLn $ ppr constraints
+          hPutStrLn stderr $ ppr constraints
 
           let tPairs = getTNodes constraints
               sPairs = getSPairs constraints
@@ -605,10 +608,14 @@ main = do
                                                  (Set.toList sPairs)
                                                  (Set.toList tPairs)
                                                  (constraintsToZ3 constraints)
-          print r
+          -- print r
 
-          case modelStr_maybe of
-            Left core -> putStrLn $ "Unsat core:\n" <> unlines core
-            Right modelStr -> do
-              putStrLn $ "Model:\n" <> modelStr
+
+          putStrLn $ genDOT' constraints
+          hPrint stderr r
+
+          -- case modelStr_maybe of
+          --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
+          --   Right modelStr -> do
+          --     putStrLn $ "Model:\n" <> modelStr
 

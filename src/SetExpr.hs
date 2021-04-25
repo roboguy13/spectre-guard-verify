@@ -14,6 +14,8 @@
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
@@ -100,7 +102,7 @@ data DslVar dummy a where
   -- DslVar_Pair :: (a `Subset` xs, b `Subset` xs) => (DslVar dummy a, DslVar dummy b) -> DslVar dummy xs
 
 data SetComprehension freeVars where
-  SetComp' :: NameFreeVars freeVars => (forall dummy. DslVar dummy freeVars -> (DslVar dummy freeVars, CompPred (PairToList freeVars))) -> SetComprehension (PairToList freeVars)
+  SetComp' :: (NameFreeVars freeVars) => (forall dummy. DslVar dummy freeVars -> (DslVar dummy freeVars, CompPred (PairToList freeVars))) -> SetComprehension (PairToList freeVars)
 
 -- data CompExpr freeVars where
 --   CompExpr_Sens :: DslVar '[Sensitivity] -> CompExpr '[Sensitivity]
@@ -112,7 +114,7 @@ data CompPred freeVars where
   CompPred_And :: CompPred freeVarsA -> CompPred freeVarsB -> CompPred (Append freeVarsA freeVarsB)
 
 data LatticeOp where
-  LatticeJoin' :: () => SetComprehension freeVars -> LatticeOp
+  LatticeJoin' :: (Ppr (ListToPairs freeVars)) => SetComprehension freeVars -> LatticeOp
 
 data SetConstraint =
   forall freeVars.
@@ -132,7 +134,7 @@ data SetExpr (freeVars :: [*]) where
   SE_IfThenElse :: Condition -> SetExpr freeVars -> SetExpr freeVars -> SetExpr freeVars
   SE_Empty :: SetExpr freeVars
    -- Set comprehension:
-  SE_Comp :: () => SetComprehension freeVars -> SetExpr freeVars
+  SE_Comp :: (Ppr (ListToPairs freeVars)) => SetComprehension freeVars -> SetExpr freeVars
   SE_LatticeOp :: LatticeOp -> SetExpr '[]
 
 pattern SetComp x = SE_Comp (SetComp' x)
@@ -157,15 +159,14 @@ instance Ppr LatticeOp where
   ppr (LatticeJoin' x) = "U" <> ppr x
 
 -- | For use in pretty printing
-class NameFreeVars freeVars where
-  nameFreeVars :: proxy freeVars -> DslVar String (ListToPairs freeVars)
-  -- nameFreeVars :: proxy (PairToList freeVars) -> DslVar String freeVars
+class Ppr freeVars => NameFreeVars freeVars where
+  nameFreeVars :: proxy (PairToList freeVars) -> DslVar String freeVars
 
--- instance NameFreeVars '[Var, Sensitivity] where
---   nameFreeVars _ = DslVar_Pair (DslVar @_ @'[Var] "v", DslVar @_ @'[Sensitivity] "s")
+instance NameFreeVars (Var, Sensitivity) where
+  nameFreeVars _ = DslVar_Pair (DslVar @_ @Var "v", DslVar @_ @Sensitivity "s")
 
--- instance NameFreeVars '[Sensitivity] where
---   nameFreeVars _ = DslVar "s"
+instance NameFreeVars Sensitivity where
+  nameFreeVars _ = DslVar "s"
 
 type family PprList xs :: Constraint where
   PprList '[] = ()
@@ -198,7 +199,7 @@ instance (Ppr a, Ppr b) => Ppr (a, b) where
 --     ppr (DslVar str) = str
 --     ppr (DslVar_Value v) = undefined --ppr v
 
-instance (PprList freeVars) => Ppr (SetComprehension freeVars) where
+instance (Ppr (ListToPairs freeVars)) => Ppr (SetComprehension freeVars) where
   ppr sc@(SetComp' f) =
     let (x, p) = f (nameFreeVars (Proxy @freeVars)) --sc)
     in
