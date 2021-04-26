@@ -114,12 +114,17 @@ arrowheadAttr :: Arrowhead -> String
 arrowheadAttr Forward = "arrowhead=" <> show "empty"
 arrowheadAttr Backward = "arrowhead=" <> show "invempty"
 
-dotConnect :: NodeId -> NodeId -> String
-dotConnect (NodeId x) (NodeId y) = dotConnect' (show x) (show y)
+-- dotConnect :: NodeId -> NodeId -> String
+-- dotConnect (NodeId x) (NodeId y) = dotConnect' (show x) (show y)
 
-dotConnect' :: String -> String -> String
-dotConnect' x y
+dotConnect :: String -> String -> String
+dotConnect x y
   | x /= y = x <> " -> " <> y <> ";"
+  | x == y = ""
+
+dotConnectWithColor :: String -> String -> String -> String
+dotConnectWithColor color x y
+  | x /= y = x <> " -> " <> y <> " [color=" <> color <> "];"
   | x == y = ""
 
 class BoundaryNodes a where
@@ -184,8 +189,8 @@ genBoundaries (x :=: y) = do
             nEntry <- liftSTT $ nodeClassName entry <$> classDesc entryEq n
             nExit  <- liftSTT $ nodeClassName exit  <$> classDesc exitEq  n
             return $
-              [ nEntry `dotConnect'` node n
-              , node n `dotConnect'` nExit]
+              [ nEntry `dotConnect` node n
+              , node n `dotConnect` nExit]
             -- return $
             --   map (`dotConnect'` (node n)) entries
             --   <> map (dotConnect' (node n)) exits
@@ -243,13 +248,13 @@ genDOTFor' :: SetConstraint -> DOTM s [String]
 genDOTFor' (C_Entry' n :=: y) = do
   entryEq <- entryEquiv
   nDesc <- liftSTT $ classDesc entryEq n
-  genConnections (flip dotConnect') (nodeClassName entry nDesc) y
+  genConnections (flip (dotConnectWithColor "red")) (nodeClassName entry nDesc) y
 
 genDOTFor' (C_Exit'  n :=: y) = do
   exitEq <- exitEquiv
   nDesc <- liftSTT $ classDesc exitEq n
 
-  genConnections (flip dotConnect') (nodeClassName exit nDesc) y
+  genConnections (flip (dotConnectWithColor "red")) (nodeClassName exit nDesc) y
 genDOTFor' (Atom_E' {} :=: _) = return []
 genDOTFor' (Atom_S' {} :=: _) = return []
 
