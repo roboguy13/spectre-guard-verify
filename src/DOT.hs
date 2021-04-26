@@ -168,23 +168,24 @@ nodeClassName f = intercalate "_" . map f
 genBoundaries :: SetConstraint -> DOTM s [String]
 genBoundaries (x :=: y) = do
   let allNodeIds = toList $ getNodeIds x <> getNodeIds y
-      entries0 = toList $ getEntryNodes x <> getEntryNodes y
-      exits0 = toList $ getExitNodes x <> getExitNodes y
+      -- entries0 = toList $ getEntryNodes x <> getEntryNodes y
+      -- exits0 = toList $ getExitNodes x <> getExitNodes y
 
   entryEq <- entryEquiv
   exitEq <- exitEquiv
 
-  entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) entries0
-  exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) exits0
+  entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) allNodeIds
+  exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) allNodeIds
 
-  fmap concat $ flip mapM allNodeIds
+  fmap (<> map (<> " [shape=box];") (entries ++ exits))
+    $ fmap concat
+    $ flip mapM allNodeIds
         $ \n -> do
             nEntry <- liftSTT $ nodeClassName entry <$> classDesc entryEq n
             nExit  <- liftSTT $ nodeClassName exit  <$> classDesc exitEq  n
             return $
               [ nEntry `dotConnect'` node n
               , node n `dotConnect'` nExit]
-              <> map (<> " [shape=box];") (entries ++ exits)
             -- return $
             --   map (`dotConnect'` (node n)) entries
             --   <> map (dotConnect' (node n)) exits
