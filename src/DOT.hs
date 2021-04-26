@@ -248,7 +248,7 @@ genDOTFor' (C_Exit'  n :=: y) = do
   exitEq <- exitEquiv
   nDesc <- liftSTT $ classDesc exitEq n
 
-  genConnections dotConnect' (nodeClassName exit nDesc) y
+  genConnections (flip dotConnect') (nodeClassName exit nDesc) y
 genDOTFor' (Atom_E' {} :=: _) = return []
 genDOTFor' (Atom_S' {} :=: _) = return []
 
