@@ -2,6 +2,8 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module DOT (genDOT, genDOT', DOTConfig(..), defaultDOTConfig) where
 
@@ -55,7 +57,11 @@ genDOT config constraints =
   runDOTM $ do
     mapM_ combineEntries constraints
     mapM_ combineExits constraints
-    boundaries <- mapM genBoundaries constraints
+
+    let entries = toList $ getEntryNodes constraints
+        exits   = toList $ getExitNodes constraints
+
+    boundaries <- mapM (genBoundaries entries exits) constraints
 
     connections <- mapM (uncurry genDOTFor) (zip [1..] constraints)
 
@@ -131,6 +137,14 @@ class BoundaryNodes a where
   getEntryNodes :: a -> Set NodeId
   getExitNodes :: a -> Set NodeId
 
+instance BoundaryNodes SetConstraint where
+  getEntryNodes (x :=: y) = getEntryNodes x <> getEntryNodes y
+  getExitNodes  (x :=: y) = getExitNodes x <> getExitNodes y
+
+instance BoundaryNodes SetConstraints where
+  getEntryNodes = foldr (<>) mempty . map getEntryNodes
+  getExitNodes =  foldr (<>) mempty . map getExitNodes
+
 instance BoundaryNodes (SetExpr freeVars) where
   getEntryNodes (SE_Atom a) = getEntryNodes a
   getEntryNodes (SE_Union x y) = getEntryNodes x <> getEntryNodes y
@@ -170,17 +184,20 @@ node (NodeId n) = "n" <> show n
 nodeClassName :: (NodeId -> String) -> [NodeId] -> String
 nodeClassName f = intercalate "_" . map f
 
-genBoundaries :: SetConstraint -> DOTM s [String]
-genBoundaries (x :=: y) = do
+genBoundaries :: [NodeId] -> [NodeId] -> SetConstraint -> DOTM s [String]
+genBoundaries actualEntries actualExits (x :=: y) = do
   let allNodeIds = toList $ getNodeIds x <> getNodeIds y
-      -- entries0 = toList $ getEntryNodes x <> getEntryNodes y
-      -- exits0 = toList $ getExitNodes x <> getExitNodes y
+      -- actualEntries = toList $ getEntryNodes x <> getEntryNodes y
+      -- actualExits = toList $ getExitNodes x <> getExitNodes y
 
   entryEq <- entryEquiv
   exitEq <- exitEquiv
 
-  entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) allNodeIds
-  exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) allNodeIds
+  -- entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) allNodeIds
+  -- exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) allNodeIds
+
+  entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) actualEntries
+  exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) actualExits
 
   fmap (<> map (<> " [shape=box];") (entries ++ exits))
     $ fmap concat
@@ -188,9 +205,21 @@ genBoundaries (x :=: y) = do
         $ \n -> do
             nEntry <- liftSTT $ nodeClassName entry <$> classDesc entryEq n
             nExit  <- liftSTT $ nodeClassName exit  <$> classDesc exitEq  n
-            return $
-              [ nEntry `dotConnect` node n
-              , node n `dotConnect` nExit]
+
+            return
+              $  singletonIf (nEntry `dotConnect` node n) (`elem` actualEntries) n
+              <> singletonIf (node n `dotConnect` nExit)  (`elem`  actualExits)  n
+
+            -- return $
+            --   [ nEntry `dotConnect` node n
+            --   , node n `dotConnect` nExit]
+
+  where
+    singletonIf :: a -> (b -> Bool) -> b -> [a]
+    singletonIf x p y
+      | p y = [x]
+      | otherwise = []
+
             -- return $
             --   map (`dotConnect'` (node n)) entries
             --   <> map (dotConnect' (node n)) exits
