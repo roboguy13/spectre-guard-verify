@@ -177,15 +177,21 @@ genBoundaries (x :=: y) = do
   entries <- liftSTT $ map (nodeClassName entry) <$> mapM (classDesc entryEq) entries0
   exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM (classDesc exitEq) exits0
 
-  return $
-    fmap concat $ flip mapM allNodeIds
+  fmap concat $ flip mapM allNodeIds
         $ \n -> do
-            -- theEntry <-
-            map (`dotConnect'` (node n)) entries
-            <> map (dotConnect' (node n)) exits
-            <> map (<> " [shape=box];") (entries ++ exits)
-            -- <> [entry n <> " [shape=box];"]
-            -- <> [exit n <> " [shape=box];"]
+            nEntry <- liftSTT $ nodeClassName entry <$> classDesc entryEq n
+            nExit  <- liftSTT $ nodeClassName exit  <$> classDesc exitEq  n
+            return $
+              [ nEntry `dotConnect'` node n
+              , node n `dotConnect'` nExit]
+              <> map (<> " [shape=box];") (entries ++ exits)
+            -- return $
+            --   map (`dotConnect'` (node n)) entries
+            --   <> map (dotConnect' (node n)) exits
+            --   <> map (<> " [shape=box];") (entries ++ exits)
+
+              -- <> [entry n <> " [shape=box];"]
+              -- <> [exit n <> " [shape=box];"]
 
   -- return $ foldr (<>) mempty $
   --   flip Set.map allNodeIds
