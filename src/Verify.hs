@@ -177,6 +177,19 @@ consistentSensitivity nodeIds f = do
                <!> mkEq true true
         )))
 
+generateSConstraints :: [(NodeId, NodeId)] -> [SetConstraint]
+generateSConstraints = map go
+  where
+    go (m, n) =
+      let sf :: SetFamily '[Var, SensExpr]
+          sf = atom_s m n
+
+          comp :: SetComprehension (Var, SensExpr)
+          comp =
+            SetComp' undefined undefined
+      in
+      sf :=: SE_Comp comp
+
 generateS's :: [(NodeId, NodeId)] -> Z3Converter ()
 generateS's [] = pure ()
 generateS's sPairs@((firstPairA, firstPairB):_) = do

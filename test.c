@@ -2,12 +2,14 @@
 
 int test() {
   int y __attribute__((nospec));
+  int w __attribute__((nospec));
   int z;
   int x;
   x = z;
+  // w = y;
 
   if (y == 0) {
-    x = 3;
+     w = 3;
   }
   return 1;
 }
