@@ -188,7 +188,10 @@ generateSConstraints = map go
           comp :: SetComprehension (Var, SensExpr)
           comp =
             SetComp'
-              (PairPat :-> \(v, s) -> SE_UnionSingle SE_Empty v s)
+              (PairPat :-> \(v, s) ->
+                  let s' = undefined
+                  in
+                  SE_UnionSingle SE_Empty v s')
               (PairPat :-> (`CompPred_PairIn` c_exit n))
       in
       sf :=: SE_Comp comp
