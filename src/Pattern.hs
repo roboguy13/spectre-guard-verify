@@ -4,10 +4,10 @@
 
 module Pattern where
 
-data Pattern f s t where
-  BasePat :: Pattern f (f a) a
-  PairPat :: Pattern f (f (a, b)) (f a, f b)
+data Pattern s where
+  BasePat :: Pattern a
+  PairPat :: Pattern (a, b)
 
-data Match f s t where
-  (:->) :: Pattern f s t -> (s -> t) -> Match f s t
+data Match s t where
+  (:->) :: Pattern s -> (s -> t) -> Match s t
 

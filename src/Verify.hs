@@ -50,6 +50,7 @@ import qualified Data.Set as Set
 import           Orphans ()
 import           Ppr
 import           SetExpr
+import           Pattern
 import           ConstraintGen
 import           DOT
 
@@ -186,7 +187,9 @@ generateSConstraints = map go
 
           comp :: SetComprehension (Var, SensExpr)
           comp =
-            SetComp' undefined undefined
+            SetComp'
+              (PairPat :-> \(v, s) -> SE_UnionSingle SE_Empty v s)
+              (PairPat :-> (`CompPred_PairIn` c_exit n))
       in
       sf :=: SE_Comp comp
 

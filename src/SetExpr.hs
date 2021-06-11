@@ -22,6 +22,7 @@
 module SetExpr where
 
 import           Control.Monad.State
+import           Control.Monad.Identity
 
 import           Data.Data
 import           Data.Kind
@@ -103,21 +104,21 @@ type family ListToPairs xs where
 --   -- DslVar_Pair :: (a `Subset` xs, b `Subset` xs) => (DslVar dummy a, DslVar dummy b) -> DslVar dummy xs
 
 data SetComprehension freeVars where
-  SetComp' :: Ppr r => Match CompExpr freeVars r -> Match CompExpr freeVars CompPred -> SetComprehension freeVars
+  SetComp' :: Ppr r => Match freeVars r -> Match freeVars CompPred -> SetComprehension freeVars
 
   -- SetComp' :: (NameFreeVars freeVars) => (forall dummy. DslVar dummy freeVars -> (DslVar dummy freeVars, CompPred (PairToList freeVars))) -> SetComprehension (PairToList freeVars)
 
-data CompExpr a where
-  CompExpr_Val :: a -> CompExpr a
-  CompExpr_Pair :: a -> b -> CompExpr (a, b)
+-- data CompExpr a where
+--   CompExpr_Val :: a -> CompExpr a
+--   CompExpr_Pair :: a -> b -> CompExpr (a, b)
 
 -- data CompExpr freeVars where
 --   CompExpr_Sens :: DslVar '[Sensitivity] -> CompExpr '[Sensitivity]
 --   CompExpr_Pair :: DslVar '[Var, Sensitivity] -> CompExpr (Var, Sensitivity)
 
 data CompPred where
-  CompPred_PairIn :: (CompExpr Var, CompExpr Sensitivity) -> SetFamily freeVars -> CompPred
-  CompPred_VarIn :: CompExpr Var -> SetFamily '[Var] -> CompPred
+  CompPred_PairIn :: (Var, SensExpr) -> SetFamily freeVars -> CompPred
+  CompPred_VarIn :: Var -> SetFamily '[Var] -> CompPred
   CompPred_And :: CompPred -> CompPred -> CompPred
 
 -- data CompPred freeVars where
@@ -202,6 +203,9 @@ type family PprList xs :: Constraint where
 instance (Ppr a, Ppr b) => Ppr (a, b) where
   ppr (x, y) = "(" <> ppr x <> ", " <> ppr y <> ")"
 
+instance (Ppr a) => Ppr (Identity a) where
+  ppr (Identity x) = ppr x
+
 -- instance PprList freeVars => Ppr (DslVar String freeVars) where
   -- ppr (DslVar str) = str
   -- ppr (DslVar_Value v) = ppr v
@@ -212,11 +216,11 @@ instance (Ppr a, Ppr b) => Ppr (a, b) where
 --     ppr (DslVar str) = str
 --     ppr (DslVar_Value v) = undefined --ppr v
 
-instance (Ppr (f s), Ppr (f t)) => Ppr (Match f s t) where
+instance (Ppr s, Ppr t) => Ppr (Match s t) where
   ppr = undefined
 
-instance (Ppr a) => Ppr (CompExpr a) where
-  ppr (CompExpr_Val x) = ppr x
+-- instance (Ppr a) => Ppr (CompExpr a) where
+--   ppr (CompExpr_Val x) = ppr x
 
 instance (Ppr freeVars) => Ppr (SetComprehension freeVars) where
   ppr sc@(SetComp' f p) =
