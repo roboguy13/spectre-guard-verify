@@ -29,12 +29,80 @@ import           Data.Kind
 import           Data.Proxy
 import           Data.Type.Bool
 import           Data.Constraint
+import           Data.Semigroup
 
 import           Ppr
 import           Pattern
 
 import           Data.Set (Set)
 import qualified Data.Set as Set
+
+class ConstraintE p q where
+  (.=.) :: forall f a. f a -> p f a -> q f
+  -- someConstraint :: q f -> SomeConstraint f
+
+instance ConstraintE SetExpr SomeConstraint where
+  x .=. y = SetConstraint (x .=. y)
+
+instance ConstraintE LatticeExpr SomeConstraint where
+  x .=. y = LatticeConstraint (x .=. y)
+
+class InterpretConstraint p f i where
+  interpret :: p f -> i
+
+data SomeConstraint f where
+  LatticeConstraint :: LatticeConstraint f -> SomeConstraint f
+  SetConstraint     :: SetConstraint f     -> SomeConstraint f
+
+interpretConstraints :: forall f i. (InterpretConstraint LatticeConstraint f i, InterpretConstraint SetConstraint f i, Monoid i) => [SomeConstraint f] -> i
+interpretConstraints = foldMap interpretSC
+  where
+    interpretSC :: SomeConstraint f -> i
+    interpretSC (LatticeConstraint c) = interpret c
+    interpretSC (SetConstraint c) = interpret c
+
+data SetConstraint f =
+  forall a.
+    SetConstr (f a) (SetExpr f a)
+
+data LatticeConstraint f =
+  forall a.
+    LatticeConstr (f a) (LatticeExpr f a)
+
+instance ConstraintE SetExpr SetConstraint where
+  (.=.) = SetConstr
+
+instance ConstraintE LatticeExpr LatticeConstraint where
+  (.=.) = LatticeConstr
+
+data BoolExpr f where
+  In :: a -> SetExpr f a -> BoolExpr f
+  (:&&:) :: BoolExpr f -> BoolExpr f -> BoolExpr f
+  LatticeEqual :: LatticeExpr f a -> LatticeExpr f a -> BoolExpr f
+
+data SetExpr f a where
+  SetFamily :: f a -> SetExpr f a
+  SetUnion :: SetExpr f a -> SetExpr f a -> SetExpr f a
+  SetUnionSingle :: SetExpr f a -> a -> SetExpr f a
+  SetCompr :: (a -> b) -> (a -> BoolExpr f) -> SetExpr f a -> SetExpr f a
+  SetIte :: BoolExpr f -> SetExpr f a -> SetExpr f a -> SetExpr f a
+  SetEmpty :: SetExpr f a
+
+data LatticeExpr f a where
+  LatticeVal :: a -> LatticeExpr f a
+  Lub :: SetExpr f a -> LatticeExpr f a
+  LatticeIte :: BoolExpr f -> LatticeExpr f a -> LatticeExpr f a -> LatticeExpr f a
+
+class Ite p where
+  ite :: BoolExpr f -> p f a -> p f a -> p f a
+
+instance Ite SetExpr where
+  ite = SetIte
+
+instance Ite LatticeExpr where
+  ite = LatticeIte
+
+{-
 
 type family Sublist xs ys where
   Sublist (x:xs) (x:ys) = Sublist xs ys
@@ -420,4 +488,5 @@ instance SetFamilyExpr SetExpr where
 instance SetExprAtom SetExpr where
   -- single x y = SE_Atom (single x y)
   singleVar = SE_Atom . singleVar
+-}
 
