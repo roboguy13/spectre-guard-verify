@@ -84,8 +84,8 @@ execConstraintGen (ConstraintGen g) = execWriter g
 -- constActionUncurry :: Applicative f => (a -> b -> f ()) -> (a, b) -> f (a, b)
 -- constActionUncurry f (x, y) = f x y *> pure (x, y)
 
--- constAction :: Applicative f => (a -> f ()) -> a -> f a
--- constAction f x = f x *> pure x
+constAction :: Applicative f => (a -> f ()) -> a -> f a
+constAction f x = f x *> pure x
 
 isNoSpecAttr :: Show a => CAttribute a -> Bool
 isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
@@ -104,29 +104,29 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
 
 handleDeclarator e = nop e
 
--- handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
--- handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
--- handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
---     -- nop e
+handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
+handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
+handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
+    -- nop e
 
---     mapM_ (sameNode e) declSpec
+    mapM_ (sameNode e) declSpec
 
---     -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
+    -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
 
---     -- case catMaybes $ map (\(z, _, _) -> z) xs of
---     --   [] -> pure ()
---     --   xs'@(x:_) -> do
---     --     e `connect` x
---     --     connectList xs'
+    -- case catMaybes $ map (\(z, _, _) -> z) xs of
+    --   [] -> pure ()
+    --   xs'@(x:_) -> do
+    --     e `connect` x
+    --     connectList xs'
 
---     mapM_ go xs
---   where
---     go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
---     go _ = pure ()
--- -- handleCompoundItem (CBlockDecl {}) = pure ()
--- handleCompoundItem (CBlockDecl e) = nop e
--- handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
--- handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
+    mapM_ go xs
+  where
+    go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
+    go _ = pure ()
+-- handleCompoundItem (CBlockDecl {}) = pure ()
+handleCompoundItem (CBlockDecl e) = nop e
+handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
+handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
 handleExpr :: CExpression NodeId -> ConstraintGen ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
@@ -165,7 +165,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   handleExpr cond
 
   -- e0 `connect` cond
-  tell [ c_entry (annotation cond) .=. c_entry l ]
+  tell [ c_entry (annotation cond) .=. SetFamily (c_entry l) ]
 
   tell go
 
@@ -180,7 +180,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
     go =
       [entryConstraint t
       ,c_exit l .=. SetUnion (c_entry l)
-                             (ite (SensT l `LatticeEqual` SensAtom Secret)
+                             (ite (SensFamily (SensT l) `LatticeEqual` SensAtom Secret)
                                (maybeUnion (s_family l m) (s_family l))
                                (maybeUnion (c_exit m) c_exit))
       ] ++
@@ -192,34 +192,34 @@ handleStmt e0@(CIf cond t f_maybe l) = do
 
     maybeUnion x g =
       case f_maybe of
-        Nothing -> SetFamily x
+        Nothing -> x
         Just f -> SetUnion x (g (annotation f))
 
     p = annotation cond
     m = annotation t
 
--- handleStmt e@(CCompound _ items _) = do
---   nop e
+handleStmt e@(CCompound _ items _) = do
+  nop e
 
---   case items of
---     [] -> pure ()
---     (firstItem:_) -> --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
---       e `connect` firstItem
+  case items of
+    [] -> pure ()
+    (firstItem:_) -> --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
+      e `connect` firstItem
 
---   connectList items
---   mapM_ handleCompoundItem items
+  connectList items
+  mapM_ handleCompoundItem items
 
--- handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
---   nop e
+handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
+  nop e
 
---   case children e of
---     [] -> pure ()
---     cs@(c:_) -> do
---       e `connect` c
+  case children e of
+    [] -> pure ()
+    cs@(c:_) -> do
+      e `connect` c
 
---       connectList cs
+      connectList cs
 
---       mapM_ handleStmt cs
+      mapM_ handleStmt cs
 
 -- | Generate C_Exit(n) = C_Entry(n) constraint for given node
 nop :: Annotated f => f NodeId -> ConstraintGen ()
@@ -227,12 +227,12 @@ nop e =
   tell
     [ c_exit (annotation e) .=. SetFamily (C_Entry (annotation e)) ]
 
--- connectList :: Annotated f => [f NodeId] -> ConstraintGen ()
--- connectList [] = pure ()
--- connectList [_] = pure ()
--- connectList (x:y:rest) = do
---   connect x y
---   connectList (y:rest)
+connectList :: Annotated f => [f NodeId] -> ConstraintGen ()
+connectList [] = pure ()
+connectList [_] = pure ()
+connectList (x:y:rest) = do
+  connect x y
+  connectList (y:rest)
 
 connect :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen ()
 connect x y =
@@ -247,19 +247,19 @@ sameNode x y =
     , c_exit  (annotation x) .=. SetFamily (C_Exit  (annotation y))
     ]
 
--- -- TODO: Connect to following nodes
--- handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
--- handleFunDef e@(CFunDef _ _ _ stmt _) = do
---   tell
---     [ c_exit (annotation e) :=: SE_Empty
---     , c_entry (annotation stmt) :=: c_exit (annotation e)
---     ]
---   void $ (constAction handleStmt) stmt
+-- TODO: Connect to following nodes
+handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
+handleFunDef e@(CFunDef _ _ _ stmt _) = do
+  tell
+    [ c_exit (annotation e) .=. SetEmpty
+    , c_entry (annotation stmt) .=. SetFamily (c_exit (annotation e))
+    ]
+  void $ (constAction handleStmt) stmt
 
--- handleExtDecl :: CExternalDeclaration NodeId -> ConstraintGen ()
--- handleExtDecl (CFDefExt funDef) = handleFunDef funDef
--- handleExtDecl _ = pure ()
+handleExtDecl :: CExternalDeclaration NodeId -> ConstraintGen ()
+handleExtDecl (CFDefExt funDef) = handleFunDef funDef
+handleExtDecl _ = pure ()
 
--- handleTransUnit :: (CTranslationUnit NodeId, NodeId) -> ConstraintGen ()
--- handleTransUnit (CTranslUnit xs _, _) = void $ traverse handleExtDecl xs
+handleTransUnit :: (CTranslationUnit NodeId, NodeId) -> ConstraintGen ()
+handleTransUnit (CTranslUnit xs _, _) = void $ traverse handleExtDecl xs
 
