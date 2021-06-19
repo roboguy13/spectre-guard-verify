@@ -15,6 +15,9 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
@@ -378,20 +381,26 @@ forallQuantifyFreeVars e k = do
   z3Var <- mkZ3Var @a
   mkForallConst [] (getZ3VarApps z3Var) =<< k z3Var
 
-class Z3Equality a where
-  z3Eq :: a -> a -> Z3Converter AST
+class Z3Equality a b where
+  z3Eq :: a -> b -> Z3Converter AST
 
-instance Z3Equality AST where
+instance Z3Equality AST AST where
   z3Eq = mkEq
 
-instance (Z3Equality a, Z3Equality b) => Z3Equality (a, b) where
+instance (Z3Equality a a, Z3Equality b b) => Z3Equality (a, b) (a, b) where
   z3Eq (x, y) (x', y') =
     z3M mkAnd [z3Eq x x', z3Eq y y']
 
-instance Z3Equality (Z3Var a) where
+instance Z3Equality (Z3Var a) (Z3Var a) where
   z3Eq (Z3VarSens (_, x)) (Z3VarSens (_, y)) = mkEq x y
   z3Eq (Z3VarVar (_, x)) (Z3VarVar (_, y)) = mkEq x y
   z3Eq (Z3VarPair (_, x) (_, y)) (Z3VarPair (_, x') (_, y')) = z3Eq (x, y) (x', y')
+
+instance (ToZ3 a, ToZ3 b) => Z3Equality (Z3Var (a, b)) (a, b) where
+  z3Eq (Z3VarPair x y) (x', y') = do
+    x'_z3 <- toZ3 x'
+    y'_z3 <- toZ3 y'
+    z3Eq (snd x, snd y) (x'_z3, y'_z3)
 
 getZ3VarASTs :: Z3Var a -> [AST]
 getZ3VarASTs (Z3VarSens x) = [snd x]
@@ -456,16 +465,6 @@ instance Z3SetRelation AnalysisSetFamily where
 --   applySetRelation SetEmpty _args = error "applySetRelation: SE_Empty"
 
 
--- forallQuantifyFreeVars :: forall f a. (FreeVarsE f) => f a -> ([AST] -> Z3Converter AST) -> Z3Converter AST
--- forallQuantifyFreeVars e k = do
---   fvs <- freeVarsE e
-
---   let sorts = map (\(x, _, _) -> x) fvs
---       syms = map (\(_, x, _) -> x) fvs
---       vars = map (\(_, _, x) -> x) fvs
-
---   mkForallConst [] syms =<< k vars
-
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
 
@@ -473,8 +472,8 @@ class ToZ3 a where
 instance ToZ3 NodeId where
   toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
-instance ToZ3 Int where
-  toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
+instance ToZ3 Var where
+  toZ3 (Var n) = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Sensitivity where
   toZ3 = toZ3 . (SensAtom :: Sensitivity -> SensExpr)
@@ -487,8 +486,38 @@ instance ToZ3 SensExpr where
     z3_t <- lookupZ3FuncDecl s
     mkAppM z3_t []
 
--- instance ToZ3 (AnalysisSetFamily a) where
+-- type Z3Cs a = (FreeVars a, Z3Equality (Z3Var a) a)
 
+class (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
+instance (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
+
+instance ToZ3 (SetConstraint Z3Cs AnalysisSetFamily) where
+  toZ3 (lhs `SetConstr` rhs) =
+    forallQuantifyFreeVars lhs $ \vars ->
+      mkEq <$> toZ3 (vars, lhs) <!> toZ3 (vars, rhs)
+
+-- data BoolExpr f where
+--   In :: a -> SetExpr f a -> BoolExpr f
+--   (:&&:) :: BoolExpr f -> BoolExpr f -> BoolExpr f
+--   LatticeEqual :: LatticeExpr f a -> LatticeExpr f a -> BoolExpr f
+
+-- data SetExpr f a where
+--   SetFamily :: f a -> SetExpr f a
+--   SetUnion :: SetExpr f a -> SetExpr f a -> SetExpr f a
+--   SetUnionSingle :: SetExpr f a -> a -> SetExpr f a
+--   SetCompr :: (a -> b) -> (a -> BoolExpr f) -> SetExpr f a -> SetExpr f a
+--   SetIte :: BoolExpr f -> SetExpr f a -> SetExpr f a -> SetExpr f a
+--   SetEmpty :: SetExpr f a
+
+instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr AnalysisSetFamily a) where
+  toZ3 (z3Var, se) =
+    case se of
+      SetFamily sf -> toZ3 (z3Var, sf)
+      SetUnion a b -> z3M mkOr [toZ3 (z3Var, a), toZ3 (z3Var, b)]
+      SetUnionSingle e x -> z3M mkOr [toZ3 (z3Var, e), z3Eq z3Var x]
+
+instance FreeVars a => ToZ3 (Z3Var a, AnalysisSetFamily a) where
+  toZ3 (z3Var, sf) = applySetRelation sf z3Var
 
 -- instance ToZ3 (SetConstraint AnalysisSetFamily) where
 --   toZ3 (lhs `SetConstr` SetEmpty) = do

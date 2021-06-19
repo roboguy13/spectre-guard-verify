@@ -3,6 +3,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
@@ -68,14 +69,14 @@ instance AnalysisSfExpr (SetExpr AnalysisSetFamily) where
   s_family n = SetFamily . s_family n
   b_family = SetFamily . b_family
 
-type Constraints = [SomeConstraint AnalysisSetFamily]
+type Constraints c = [SomeConstraint c AnalysisSetFamily]
 
 
-newtype ConstraintGen a = ConstraintGen (Writer Constraints a)
-  deriving (Functor, Applicative, Monad, MonadWriter Constraints)
+newtype ConstraintGen c a = ConstraintGen (Writer (Constraints c) a)
+  deriving (Functor, Applicative, Monad, MonadWriter (Constraints c))
 
 
-execConstraintGen :: ConstraintGen a -> Constraints
+execConstraintGen :: ConstraintGen c a -> Constraints c
 execConstraintGen (ConstraintGen g) = execWriter g
 
 constAction :: Applicative f => (a -> f ()) -> a -> f a
@@ -85,7 +86,7 @@ isNoSpecAttr :: Show a => CAttribute a -> Bool
 isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
 isNoSpecAttr _ = False
 
-handleDeclarator :: CDeclarator NodeId -> ConstraintGen ()
+handleDeclarator :: c (Var, SensExpr) => CDeclarator NodeId -> ConstraintGen c ()
 handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
       mapM_ (sameNode e) attrs
@@ -98,7 +99,7 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
 
 handleDeclarator e = nop e
 
-handleCompoundItem :: CCompoundBlockItem NodeId -> ConstraintGen ()
+handleCompoundItem :: c (Var, SensExpr) => CCompoundBlockItem NodeId -> ConstraintGen c ()
 handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
 handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
     -- nop e
@@ -122,7 +123,7 @@ handleCompoundItem (CBlockDecl e) = nop e
 handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
 handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
-handleExpr :: CExpression NodeId -> ConstraintGen ()
+handleExpr :: c (Var, SensExpr) => CExpression NodeId -> ConstraintGen c ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
@@ -150,7 +151,7 @@ handleExpr expr = do
   where
     exprNodeId = annotation expr
 
-handleStmt :: CStatement NodeId -> ConstraintGen ()
+handleStmt :: c (Var, SensExpr) => CStatement NodeId -> ConstraintGen c ()
 handleStmt e0@(CExpr (Just e) _) = do
   nop e0
   e0 `connect` e
@@ -216,25 +217,25 @@ handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
       mapM_ handleStmt cs
 
 -- | Generate C_Exit(n) = C_Entry(n) constraint for given node
-nop :: Annotated f => f NodeId -> ConstraintGen ()
+nop :: (c (Var, SensExpr), Annotated f) => f NodeId -> ConstraintGen c ()
 nop e =
   tell
     [ c_exit (annotation e) .=. SetFamily (C_Entry (annotation e)) ]
 
-connectList :: Annotated f => [f NodeId] -> ConstraintGen ()
+connectList :: (c (Var, SensExpr), Annotated f) => [f NodeId] -> ConstraintGen c ()
 connectList [] = pure ()
 connectList [_] = pure ()
 connectList (x:y:rest) = do
   connect x y
   connectList (y:rest)
 
-connect :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen ()
+connect :: (c (Var, SensExpr), Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen c ()
 connect x y =
   tell
     [ c_entry (annotation y) .=. SetFamily (C_Exit (annotation x)) ]
 
 -- | Combine two nodes, to behave as one
-sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen ()
+sameNode :: (c (Var, SensExpr), Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen c ()
 sameNode x y =
   tell
     [ c_entry (annotation x) .=. SetFamily (C_Entry (annotation y))
@@ -242,7 +243,7 @@ sameNode x y =
     ]
 
 -- TODO: Connect to following nodes
-handleFunDef :: CFunctionDef NodeId -> ConstraintGen ()
+handleFunDef :: c (Var, SensExpr) => CFunctionDef NodeId -> ConstraintGen c ()
 handleFunDef e@(CFunDef _ _ _ stmt _) = do
   tell
     [ c_exit (annotation e) .=. SetEmpty
@@ -250,10 +251,10 @@ handleFunDef e@(CFunDef _ _ _ stmt _) = do
     ]
   void $ (constAction handleStmt) stmt
 
-handleExtDecl :: CExternalDeclaration NodeId -> ConstraintGen ()
+handleExtDecl :: c (Var, SensExpr) => CExternalDeclaration NodeId -> ConstraintGen c ()
 handleExtDecl (CFDefExt funDef) = handleFunDef funDef
 handleExtDecl _ = pure ()
 
-handleTransUnit :: (CTranslationUnit NodeId, NodeId) -> ConstraintGen ()
+handleTransUnit :: c (Var, SensExpr) => (CTranslationUnit NodeId, NodeId) -> ConstraintGen c ()
 handleTransUnit (CTranslUnit xs _, _) = void $ traverse handleExtDecl xs
 

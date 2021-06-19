@@ -38,7 +38,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 
 class ConstraintE p where
-  (.=.) :: forall f a. f a -> p f a -> SomeConstraint f
+  (.=.) :: forall c f a. c a => f a -> p f a -> SomeConstraint c f
 
 instance ConstraintE SetExpr where
   x .=. y = SetConstraint (SetConstr x y)
@@ -47,25 +47,25 @@ instance ConstraintE LatticeExpr where
   x .=. y = LatticeConstraint (LatticeConstr x y)
 
 class InterpretConstraint p f i where
-  interpret :: p f -> i
+  interpret :: p c f -> i
 
-data SomeConstraint f where
-  LatticeConstraint :: LatticeConstraint f -> SomeConstraint f
-  SetConstraint     :: SetConstraint f     -> SomeConstraint f
+data SomeConstraint c f where
+  LatticeConstraint :: LatticeConstraint c f -> SomeConstraint c f
+  SetConstraint     :: SetConstraint c f     -> SomeConstraint c f
 
-interpretConstraints :: forall f i. (InterpretConstraint LatticeConstraint f i, InterpretConstraint SetConstraint f i, Monoid i) => [SomeConstraint f] -> i
+interpretConstraints :: forall c f i. (InterpretConstraint LatticeConstraint f i, InterpretConstraint SetConstraint f i, Monoid i) => [SomeConstraint c f] -> i
 interpretConstraints = foldMap interpretSC
   where
-    interpretSC :: SomeConstraint f -> i
+    interpretSC :: SomeConstraint c f -> i
     interpretSC (LatticeConstraint c) = interpret c
     interpretSC (SetConstraint c) = interpret c
 
-data SetConstraint f =
-  forall a.
+data SetConstraint c f =
+  forall a. c a =>
     SetConstr (f a) (SetExpr f a)
 
-data LatticeConstraint f =
-  forall a.
+data LatticeConstraint c f =
+  forall a. c a =>
     LatticeConstr (f a) (LatticeExpr f a)
 
 data BoolExpr f where
