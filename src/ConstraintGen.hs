@@ -78,12 +78,6 @@ newtype ConstraintGen a = ConstraintGen (Writer Constraints a)
 execConstraintGen :: ConstraintGen a -> Constraints
 execConstraintGen (ConstraintGen g) = execWriter g
 
--- tell' :: Constrain p => p AnalysisSetFamily -> ConstraintGen ()
--- tell' c = tell [someConstraint c]
-
--- constActionUncurry :: Applicative f => (a -> b -> f ()) -> (a, b) -> f (a, b)
--- constActionUncurry f (x, y) = f x y *> pure (x, y)
-
 constAction :: Applicative f => (a -> f ()) -> a -> f a
 constAction f x = f x *> pure x
 

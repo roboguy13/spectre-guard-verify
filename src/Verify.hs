@@ -52,11 +52,24 @@ import           Ppr
 import           SetExpr
 import           Pattern
 import           ConstraintGen
-import           DOT
+-- import           DOT
+
+data Z3Var a = Z3Var { getZ3Var :: AST }
 
 infixl 4 <!>
 (<!>) :: Monad m => m (a -> m b) -> m a -> m b
 f <!> x = join (f <*> x)
+
+mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, App, AST)
+mkSymVar name z3sort = do
+  uniq <- get
+  modify succ
+
+  sort <- lookupZ3Sort z3sort
+
+  var <- mkFreshVar name sort
+  app <- toApp var
+  return (sort, app, var)
 
 generateUnsatCores :: Bool
 generateUnsatCores = True
@@ -75,7 +88,7 @@ data Z3Sort = Sens_Sort | Var_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
   Z3Info
-  { z3Info_setFamilyDecls :: forall (a :: [Type]). SetFamily a -> FuncDecl
+  { z3Info_setFamilyDecls :: forall a. AnalysisSetFamily a -> FuncDecl
   , z3Info_sensExprDecls :: SensExpr -> FuncDecl
   , z3Info_varDecls :: Int -> FuncDecl
   , z3Info_nodeDecls :: NodeId -> FuncDecl
@@ -143,15 +156,15 @@ defineZ3Names vars nodeIds = do
 
     return $ Z3Info
        { z3Info_setFamilyDecls = \case
-            C_Exit' n -> lookup' n c_exit_fns
-            C_Entry' n -> lookup' n c_entry_fns
-            Atom_S' x _y -> lookup' x s_fns
-            Atom_E' x -> lookup' x e_fns
+            C_Exit n -> lookup' n c_exit_fns
+            C_Entry n -> lookup' n c_entry_fns
+            S x _y -> lookup' x s_fns
+            -- E x -> lookup' x e_fns
 
        , z3Info_sensExprDecls = \case
             SensAtom Public -> public_fn
             SensAtom Secret -> secret_fn
-            Sens_T x -> lookup' x t_fns
+            SensFamily (SensT x) -> lookup' x t_fns
 
        , z3Info_varDecls = \v -> lookup' v var_fns
        , z3Info_nodeDecls = \n -> lookup' n node_fns
@@ -178,75 +191,75 @@ consistentSensitivity nodeIds f = do
                <!> mkEq true true
         )))
 
-generateSConstraints :: [(NodeId, NodeId)] -> [SetConstraint]
-generateSConstraints = map go
-  where
-    go (m, n) =
-      let sf :: SetFamily '[Var, SensExpr]
-          sf = atom_s m n
+-- generateSConstraints :: [(NodeId, NodeId)] -> [SetConstraint]
+-- generateSConstraints = map go
+--   where
+--     go (m, n) =
+--       let sf :: AnalysisSetFamily '[Var, SensExpr]
+--           sf = atom_s m n
 
-          comp :: SetComprehension (Var, SensExpr)
-          comp =
-            SetComp'
-              (PairPat :-> \(v, s) ->
-                  let s' = undefined
-                  in
-                  SE_UnionSingle SE_Empty v s')
-              (PairPat :-> (`CompPred_PairIn` c_exit n))
-      in
-      sf :=: SE_Comp comp
+--           comp :: SetComprehension (Var, SensExpr)
+--           comp =
+--             SetComp'
+--               (PairPat :-> \(v, s) ->
+--                   let s' = undefined
+--                   in
+--                   SE_UnionSingle SE_Empty v s')
+--               (PairPat :-> (`CompPred_PairIn` c_exit n))
+--       in
+--       sf `SetConstr` SE_Comp comp
 
 generateS's :: [(NodeId, NodeId)] -> Z3Converter ()
 generateS's [] = pure ()
-generateS's sPairs@((firstPairA, firstPairB):_) = do
-  true <- mkTrue
+generateS's sPairs@((firstPairA, firstPairB):_) = undefined
+  -- true <- mkTrue
 
-  forM_ sPairs $ \(m, n) ->
-    -- let rhs = 
-    -- in
-    -- undefined
-    assert =<< forallQuantifyFreeVars (Atom_S' firstPairA firstPairB) (\vars@[v,s] -> do
-      secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
-      public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
+  -- forM_ sPairs $ \(m, n) ->
+  --   -- let rhs = 
+  --   -- in
+  --   -- undefined
+  --   assert =<< forallQuantifyFreeVars (s_family firstPairA firstPairB) (\vars@[v,s] -> do
+  --     secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+  --     public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
 
-      mkIte <$> applySetRelation (C_Entry' n) vars
-                   <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry' n) [v, public], applySetRelation (C_Entry' n) [v, secret]]
-                              <*> (mkEq <$> applySetRelation (Atom_S' m n) [v, secret] <!> mkTrue)
-                              <!> (mkEq <$> applySetRelation (Atom_S' m n) [v, s] <!> mkTrue))
-                   <!> (mkEq <$> mkTrue <!> mkTrue))
+  --     mkIte <$> applySetRelation (C_Entry n) vars
+  --                  <*> (mkIte <$> z3M mkOr [applySetRelation (C_Entry n) [v, public], applySetRelation (C_Entry n) [v, secret]]
+  --                             <*> (mkEq <$> applySetRelation (s_family m n) [v, secret] <!> mkTrue)
+  --                             <!> (mkEq <$> applySetRelation (s_family m n) [v, s] <!> mkTrue))
+  --                  <!> (mkEq <$> mkTrue <!> mkTrue))
 
-  let ms = Set.toList (Set.fromList (map fst sPairs))
+  -- let ms = Set.toList (Set.fromList (map fst sPairs))
 
-  forM_ ms $ \m -> do
-    let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
-    trackingAssert =<< mkAnd =<< (consistentSensitivity ns (Atom_S' m))
+  -- forM_ ms $ \m -> do
+  --   let ns = map snd $ filter (\(m', n) -> m' == m) sPairs
+  --   trackingAssert =<< mkAnd =<< (consistentSensitivity ns (s_family m))
 
 generateT's :: [NodeId] -> Z3Converter ()
-generateT's tNodes = do
-  true <- mkTrue
+generateT's tNodes = undefined
+  -- true <- mkTrue
 
-  forM_ tNodes $ \n -> do
-    (var_sort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+  -- forM_ tNodes $ \n -> do
+  --   (var_sort, v_sym, v_var) <- mkSymVar "v" Var_Sort
 
-    (_, v'_sym, v'_var) <- mkSymVar "v'" Var_Sort
+  --   (_, v'_sym, v'_var) <- mkSymVar "v'" Var_Sort
 
-    secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
-    public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
-    sens_t <- lookupZ3FuncDecl (Sens_T n)
-    n_z3 <- mkApp <$> lookupZ3FuncDecl n <!> pure []
+  --   secret <- mkApp <$> (lookupZ3FuncDecl (SensAtom Secret)) <!> pure []
+  --   public <- mkApp <$> (lookupZ3FuncDecl (SensAtom Public)) <!> pure []
+  --   sens_t <- lookupZ3FuncDecl (SensT n)
+  --   n_z3 <- mkApp <$> lookupZ3FuncDecl n <!> pure []
 
-    assert =<<
-      mkIte <$> z3M mkOr
-                     [mkForallConst [] [v'_sym] =<< (mkNot =<< (applySetRelation (Atom_E' n) [v'_var]))
-                     ,mkForallConst [] [v_sym] =<< (mkImplies <$> (applySetRelation (Atom_E' n) [v_var]) <!> (applySetRelation (C_Entry n) [v_var, public]))
-                     ]
-            <*> (mkEq <$> (mkApp sens_t []) <!> pure public)
-            <!> (mkEq <$> (mkApp sens_t []) <!> pure secret)
+  --   assert =<<
+  --     mkIte <$> z3M mkOr
+  --                    [mkForallConst [] [v'_sym] =<< (mkNot =<< (applySetRelation (Atom_E' n) [v'_var]))
+  --                    ,mkForallConst [] [v_sym] =<< (mkImplies <$> (applySetRelation (Atom_E' n) [v_var]) <!> (applySetRelation (C_Entry n) [v_var, public]))
+  --                    ]
+  --           <*> (mkEq <$> (mkApp sens_t []) <!> pure public)
+  --           <!> (mkEq <$> (mkApp sens_t []) <!> pure secret)
 
 correctnessCondition :: [NodeId] -> Z3Converter ()
-correctnessCondition nodeIds = do
-  asts <- consistentSensitivity nodeIds C_Exit'
-  mapM_ trackingAssert asts
+correctnessCondition nodeIds = undefined
+  -- asts <- consistentSensitivity nodeIds C_Exit
+  -- mapM_ trackingAssert asts
 
 evalZ3Converter :: [Int] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
@@ -272,7 +285,7 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
 
-instance forall (t :: [Type]). Z3FuncDecl (SetFamily t) where
+instance forall t. Z3FuncDecl (AnalysisSetFamily t) where
   lookupZ3FuncDecl x = do
     z3Info <- ask
     return $ z3Info_setFamilyDecls z3Info x
@@ -301,62 +314,81 @@ z3M :: MonadZ3 z3 => ([a] -> z3 b) -> [z3 a] -> z3 b
 z3M f argsM =
   f =<< sequence argsM
 
-lookupSetFamilyFn :: SetFamily a -> Z3Converter (FuncDecl, [AST])
-lookupSetFamilyFn sf@(C_Exit' _n) = do
+lookupSetFamilyFn :: AnalysisSetFamily a -> Z3Converter (FuncDecl, [AST])
+lookupSetFamilyFn sf@(C_Exit _n) = do
   f <- lookupZ3FuncDecl sf
   pure (f, [])
 
-lookupSetFamilyFn sf@(C_Entry' _n) = do
+lookupSetFamilyFn sf@(C_Entry _n) = do
   f <- lookupZ3FuncDecl sf
   pure (f, [])
 
-lookupSetFamilyFn sf@(Atom_S' _x y) = do
+lookupSetFamilyFn sf@(S _x y) = do
   f <- lookupZ3FuncDecl sf
-  (f,) <$> sequence [toZ3 y]
+  undefined
+  -- (f,) <$> sequence [toZ3 y]
 
-lookupSetFamilyFn sf@(Atom_E' _x) = do
-  f <- lookupZ3FuncDecl sf
-  pure (f, [])
-
-applyFamilyFnM :: SetFamily a -> [Z3Converter AST] -> Z3Converter AST
+applyFamilyFnM :: AnalysisSetFamily a -> [Z3Converter AST] -> Z3Converter AST
 applyFamilyFnM sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
   mkAppM sf (map pure args ++ restArgs)
 
-class FreeVars (a :: [Type]) where
+class FreeVars a where
   freeVars :: f a -> Z3Converter [(Sort, App, AST)]
 
--- NOTE: We do not worry about name collisions since there should be no
--- nested foralls currently. If there is a nested forall, this will need to
--- be revisited (with freshness of names ensured explicitly)
-instance FreeVars '[] where
-  freeVars _ = pure []
+instance (FreeVars a, FreeVars b) => FreeVars (a, b) where
+  freeVars _ = (<>) <$> freeVars (Proxy @a) <*> freeVars (Proxy @b)
 
-instance FreeVars xs => FreeVars (Var : xs) where
-  freeVars _ = (:) <$> mkSymVar "v" Var_Sort <*> freeVars (Proxy @xs)
+instance FreeVars SensExpr where
+  freeVars _ = do
+    x <- mkSymVar "s" Sens_Sort
+    return [x]
 
-instance FreeVars xs => FreeVars (SensExpr : xs) where
-  freeVars _ = (:) <$> mkSymVar "s" Sens_Sort <*> freeVars (Proxy @xs)
+
+-- class FreeVars (a :: [Type]) where
+--   freeVars :: f a -> Z3Converter [(Sort, App, AST)]
+
+-- -- NOTE: We do not worry about name collisions since there should be no
+-- -- nested foralls currently. If there is a nested forall, this will need to
+-- -- be revisited (with freshness of names ensured explicitly)
+-- instance FreeVars '[] where
+--   freeVars _ = pure []
+
+-- instance FreeVars xs => FreeVars (Var : xs) where
+--   freeVars _ = (:) <$> mkSymVar "v" Var_Sort <*> freeVars (Proxy @xs)
+
+-- instance FreeVars xs => FreeVars (SensExpr : xs) where
+--   freeVars _ = (:) <$> mkSymVar "s" Sens_Sort <*> freeVars (Proxy @xs)
 
 class FreeVarsE f where
   freeVarsE :: f a -> Z3Converter [(Sort, App, AST)]
 
-instance FreeVarsE SetFamily where
-  freeVarsE e@(C_Exit' {}) = freeVars e
-  freeVarsE e@(C_Entry' {}) = freeVars e
-  freeVarsE e@(Atom_S' {}) = freeVars e
-  freeVarsE e@(Atom_E' {}) = freeVars e
+-- instance FreeVarsE AnalysisSetFamily where
+--   freeVarsE e@(C_Exit {}) = freeVars e
+--   freeVarsE e@(C_Entry {}) = freeVars e
+--   freeVarsE e@(S {}) = freeVars e
+--   -- freeVarsE e@(Atom_E' {}) = freeVars e
 
-instance FreeVarsE AtomicSet where
-  freeVarsE (SetFamily x) = freeVarsE x
-  freeVarsE e@(SingleVar {}) = freeVarsE e
+-- -- instance FreeVarsE AtomicSet where
+-- --   freeVarsE (AnalysisSetFamily x) = freeVarsE x
+-- --   freeVarsE e@(SingleVar {}) = freeVarsE e
 
-instance FreeVarsE SetExpr where
-  freeVarsE (SE_Atom x) = freeVarsE x
-  freeVarsE (SE_Union x y) = L.union <$> freeVarsE x <*> freeVarsE y
-  freeVarsE (SE_UnionSingle x _ _) = freeVarsE x
-  freeVarsE (SE_IfThenElse _ x y) = L.union <$> freeVarsE x <*> freeVarsE y
-  freeVarsE SE_Empty = pure []
+-- instance FreeVarsE SetExpr where
+--   freeVarsE (SetFamily x) = freeVarsE x
+--   freeVarsE (SetUnion x y) = L.union <$> freeVarsE x <*> freeVarsE y
+--   freeVarsE (SetUnionSingle x _ _) = freeVarsE x
+--   freeVarsE (SetIte _ x y) = L.union <$> freeVarsE x <*> freeVarsE y
+--   freeVarsE SetEmpty = pure []
+
+class Z3Equality a where
+  z3Eq :: a -> a -> Z3Converter AST
+
+instance (Z3Equality a, Z3Equality b) => Z3Equality (a, b) where
+  z3Eq (x, y) (x', y') =
+    z3M mkAnd [z3Eq x x', z3Eq y y']
+
+instance Z3Equality (Z3Var a) where
+  z3Eq (Z3Var x) (Z3Var y) = mkEq x y
 
 class Z3SetRelation a where
   applySetRelation :: a -> [AST] -> Z3Converter AST
@@ -364,71 +396,60 @@ class Z3SetRelation a where
   applySetRelationM :: a -> [Z3Converter AST] -> Z3Converter AST
   applySetRelationM sr xs = applySetRelation sr =<< sequence xs
 
-instance Z3SetRelation (SetFamily a) where
-  applySetRelation sr = applyFamilyFnM sr . map pure
-  applySetRelationM = applyFamilyFnM
+-- instance Z3SetRelation (AnalysisSetFamily a) where
+--   applySetRelation sr = applyFamilyFnM sr . map pure
+--   applySetRelationM = applyFamilyFnM
 
-instance Z3SetRelation (AtomicSet a) where
-  applySetRelation (SetFamily sr) args = applySetRelation sr args
-  applySetRelation (SingleVar i) _ = toZ3 i
+-- -- instance Z3SetRelation (AtomicSet a) where
+-- --   applySetRelation (AnalysisSetFamily sr) args = applySetRelation sr args
+-- --   applySetRelation (SingleVar i) _ = toZ3 i
 
-instance Z3SetRelation (SetExpr a) where
-  applySetRelation (SE_Atom sr) args = applySetRelation sr args
+-- instance Z3SetRelation (SetExpr AnalysisSetFamily a) where
+--   applySetRelation (SetFamily sr) args = applySetRelation sr args
 
-  applySetRelation (SE_Union x y) args = do
-    z3M mkOr [applySetRelation x args, applySetRelation y args]
+--   applySetRelation (SetUnion x y) args = do
+--     z3M mkOr [applySetRelation x args, applySetRelation y args]
 
-  applySetRelation (SE_UnionSingle x v s) args@[v',s'] = do
-    z3_v <- toZ3 v
-    z3_s <- toZ3 s
+--   applySetRelation (SetUnionSingle x (v, s)) args@[v',s'] = do
+--     z3_v <- toZ3 v
+--     z3_s <- toZ3 s
 
-    z3M mkOr [ applySetRelation x args
-             , z3M mkAnd [mkEq z3_v v', mkEq z3_s s']
-             ]
+--     z3M mkOr [ applySetRelation x args
+--              , z3M mkAnd [mkEq z3_v v', mkEq z3_s s']
+--              ]
 
-  applySetRelation (SE_IfThenElse (SensEqual sensX sensY) t f) args = do
-    z3_sensX <- toZ3 sensX
-    z3_sensY <- toZ3 sensY
+--   applySetRelation (SetIte (LatticeEqual sensX sensY) t f) args = do
+--     z3_sensX <- toZ3 sensX
+--     z3_sensY <- toZ3 sensY
 
-    eql <- mkEq z3_sensX z3_sensY
+--     eql <- mkEq z3_sensX z3_sensY
 
-    mkIte eql <$> applySetRelation t args <!> applySetRelation f args
+--     mkIte eql <$> applySetRelation t args <!> applySetRelation f args
 
-  applySetRelation (SE_IfThenElse (PairIn (v, s) x) t f) args = do
-    z3_v <- toZ3 v
-    z3_s <- toZ3 s
+--   applySetRelation (SetIte (In (v, s) x) t f) args = do
+--     z3_v <- toZ3 v
+--     z3_s <- toZ3 s
 
-    cond <- applySetRelation x [z3_v, z3_s]
+--     cond <- applySetRelation x [z3_v, z3_s]
 
-    mkIte cond <$> applySetRelation t args <!> applySetRelation f args
+--     mkIte cond <$> applySetRelation t args <!> applySetRelation f args
 
-  applySetRelation SE_Empty _args = error "applySetRelation: SE_Empty"
+--   applySetRelation SetEmpty _args = error "applySetRelation: SE_Empty"
 
 
-forallQuantifyFreeVars :: forall f a. (FreeVarsE f) => f a -> ([AST] -> Z3Converter AST) -> Z3Converter AST
-forallQuantifyFreeVars e k = do
-  fvs <- freeVarsE e
+-- forallQuantifyFreeVars :: forall f a. (FreeVarsE f) => f a -> ([AST] -> Z3Converter AST) -> Z3Converter AST
+-- forallQuantifyFreeVars e k = do
+--   fvs <- freeVarsE e
 
-  let sorts = map (\(x, _, _) -> x) fvs
-      syms = map (\(_, x, _) -> x) fvs
-      vars = map (\(_, _, x) -> x) fvs
+--   let sorts = map (\(x, _, _) -> x) fvs
+--       syms = map (\(_, x, _) -> x) fvs
+--       vars = map (\(_, _, x) -> x) fvs
 
-  mkForallConst [] syms =<< k vars
+--   mkForallConst [] syms =<< k vars
 
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
 
-
-mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, App, AST)
-mkSymVar name z3sort = do
-  uniq <- get
-  modify succ
-
-  sort <- lookupZ3Sort z3sort
-
-  var <- mkFreshVar name sort
-  app <- toApp var
-  return (sort, app, var)
 
 instance ToZ3 NodeId where
   toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
@@ -437,204 +458,204 @@ instance ToZ3 Int where
   toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Sensitivity where
-  toZ3 = toZ3 . SensAtom
+  toZ3 = toZ3 . (SensAtom :: Sensitivity -> SensExpr)
 
 instance ToZ3 SensExpr where
   toZ3 s@(SensAtom _) =
     mkApp <$> (lookupZ3FuncDecl s) <!> pure []
 
-  toZ3 s@(Sens_T x) = do
+  toZ3 s@(SensFamily (SensT x)) = do
     z3_t <- lookupZ3FuncDecl s
     mkAppM z3_t []
 
 
-instance ToZ3 SetConstraint where
-  toZ3 (lhs :=: SE_Empty) = do
-    forallQuantifyFreeVars lhs $ \vars -> do
-      mkEq <$> applySetRelation lhs vars <!> mkFalse
+-- instance ToZ3 (SetConstraint AnalysisSetFamily) where
+--   toZ3 (lhs `SetConstr` SetEmpty) = do
+--     forallQuantifyFreeVars lhs $ \vars -> do
+--       mkEq <$> applySetRelation lhs vars <!> mkFalse
 
-  toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SingleVar v0)) = do
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    z3_v0 <- toZ3 v0
+--   -- toZ3 (lhs@(Atom_E' _) `SetConstr` SE_Atom (SingleVar v0)) = do
+--   --   (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+--   --   z3_v0 <- toZ3 v0
 
-    mkForallConst [] [v_sym]
-      =<< mkIte <$> mkEq z3_v0 v_var
-                <*> (mkEq <$> applySetRelation lhs [v_var] <!> mkTrue)
-                <!> (mkEq <$> applySetRelation lhs [v_var] <!> mkFalse)
+--   --   mkForallConst [] [v_sym]
+--   --     =<< mkIte <$> mkEq z3_v0 v_var
+--   --               <*> (mkEq <$> applySetRelation lhs [v_var] <!> mkTrue)
+--   --               <!> (mkEq <$> applySetRelation lhs [v_var] <!> mkFalse)
 
-  toZ3 (lhs@(Atom_E' _) :=: SE_Atom (SetFamily x)) =
-    forallQuantifyFreeVars lhs $ \vars ->
-      (mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars)
+--   -- toZ3 (lhs@(Atom_E' _) `SetConstr` SE_Atom (SetFamily x)) =
+--   --   forallQuantifyFreeVars lhs $ \vars ->
+--   --     (mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars)
 
-  toZ3 (lhs@(Atom_E' _) :=: SE_UnionSingle {}) = error "Assignment of E to a singleton of a variable/sensitivity pair"
+--   -- toZ3 (lhs@(Atom_E' _) `SetConstr` SE_UnionSingle {}) = error "Assignment of E to a singleton of a variable/sensitivity pair"
 
-  toZ3 (lhs@(Atom_E' _) :=: SE_Union x y) =
-    forallQuantifyFreeVars lhs $ \vars -> do
-      the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
-      mkEq <$> applySetRelation lhs vars <!> pure the_or
-
-
-
-  toZ3 (lhs :=: SE_Atom (SetFamily x)) =
-    forallQuantifyFreeVars lhs $ \vars ->
-      mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars
-
-  toZ3 (_ :=: SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
-
-  toZ3 (lhs :=: SE_Union x y) =
-    forallQuantifyFreeVars lhs $ \vars -> do
-      the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
-      mkEq <$> applySetRelation lhs vars <!> pure the_or
-
-  toZ3 (lhs :=: SE_UnionSingle x v0 s0) = do
-
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-    let vs = [v_var, s_var]
-
-    mkForallConst [] [v_sym, s_sym]
-      =<< (mkIte <$> z3M mkAnd [mkEq v_var =<< toZ3 v0, mkEq s_var =<< toZ3 s0]
-                 <*> (mkEq <$> applySetRelation lhs vs <!> mkTrue)
-                 <!> (mkEq <$> applySetRelation lhs vs <!> applySetRelation x vs))
-
-  toZ3 (lhs :=: SE_IfThenElse (SensEqual sensX sensY) t f) = do
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-    let vs = [v_var, s_var]
-
-    z3_sensX <- toZ3 sensX
-    z3_sensY <- toZ3 sensY
-
-    eql <- mkEq z3_sensX z3_sensY
-
-    z3_t <- applySetRelation t vs
-    z3_f <- applySetRelation f vs
-
-    mkForallConst [] [v_sym, s_sym]
-      =<< (mkIte eql <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
-                     <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
-
-  toZ3 (lhs :=: SE_IfThenElse (PairIn (v, s) x) t f) = do
-
-    z3_v <- toZ3 v
-    z3_s <- toZ3 s
-
-    cond <- applySetRelation x [z3_v, z3_s]
-
-    (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
-    (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
-    let vs = [v_var, s_var]
-
-    z3_t <- applySetRelation t vs
-    z3_f <- applySetRelation f vs
-
-    mkForallConst [] [v_sym, s_sym]
-      =<< (mkIte cond <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
-                      <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
-
-constraintsToZ3 :: SetConstraints -> Z3Converter ()
-constraintsToZ3 cs = do
-  asts <- mapM toZ3 cs
-
-  let astsZipped = zip asts [0..]
-
-  forM_ astsZipped $ \(ast, n) -> do
-    track <- mkFreshBoolVar $ "ast" ++ show n
-
-    {- trackingAssert track -}
-    assert ast
-
-nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
-nodeIdToLoc transUnit nodeId =
-  (nodeId, fmap posOf . lookup nodeId $ foldMap (\(info, nodeId') -> [(nodeId', info)]) transUnit)
-
-nodeIdLocInfo :: [(NodeId, Maybe Position)] -> String
-nodeIdLocInfo = unlines . map go
-  where
-    go (nodeId, pos_maybe) = ppr nodeId ++ ": " ++
-      case pos_maybe of
-        Nothing -> "<no position info>"
-        Just pos -> show pos
-
-getAnns :: CTranslationUnit a -> [a]
-getAnns = foldMap (:[])
-
-data GCC_NoIncludes = GCC_NoIncludes FilePath
-
-instance Preprocessor GCC_NoIncludes where
-  parseCPPArgs (GCC_NoIncludes path) = parseCPPArgs (newGCC path)
-
-  runCPP (GCC_NoIncludes path) cpp_args = do
-    let tempFile = replaceExtension (inputFile cpp_args) "i-sed"
-
-    (_, Just h1, _, p1) <- createProcess (proc "sed" ["s/^[[:space:]]*#[[:space:]]*include.*//", inputFile cpp_args]) { std_out = CreatePipe }
-    (_, _, _, p2)       <- createProcess (proc path (buildCppArgs' cpp_args ++ ["-E", "-"])) { std_in = UseHandle h1 }
-
-    waitForProcess p1
-    waitForProcess p2
-
--- Adapted from Language.C.System.GCC to avoid using the input file (so
--- that stdin is used instead)
-buildCppArgs' :: CppArgs -> [String]
-buildCppArgs' (CppArgs options extra_args _tmpdir _input_file output_file_opt) =
-       (concatMap tOption options)
-    ++ outputFileOpt
-    ++ extra_args
-    where
-    tOption (IncludeDir incl)  = ["-I",incl]
-    tOption (Define key value) = [ "-D" ++ key ++ (if null value then "" else "=" ++ value) ]
-    tOption (Undefine key)     = [ "-U" ++ key ]
-    tOption (IncludeFile f)    = [ "-include", f]
-    outputFileOpt = concat [ ["-o",output_file] | output_file <- maybeToList output_file_opt ]
-
-gccPath :: FilePath
-gccPath = "/usr/bin/gcc"
-
-main :: IO ()
-main = do
-  let fileName = "../test.c"
-
-  let gcc = GCC_NoIncludes gccPath
-
-  stream_either <- runPreprocessor gcc $ CppArgs
-    { cppOptions = []
-    , extraOptions = ["-nostdinc"]
-    , cppTmpDir = Nothing
-    , inputFile = fileName
-    , outputFile = Nothing
-    }
-
-  case stream_either of
-    Left err -> putStrLn $ "Preprocessing failed: " ++ show err
-    Right stream -> do
-      case parseC stream (initPos fileName) of
-        Left err -> error (show err)
-        Right parsed -> do
-          let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
-              parsed'' = first (fmap snd) parsed'
-              constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
-              nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
-              theNodeIds = getNodeIds constraints
-
-          -- putStrLn $ ppr constraints
-          hPutStrLn stderr $ ppr constraints
-
-          let tPairs = getTNodes constraints
-              sPairs = getSPairs constraints
-
-          (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
-                                                 (Set.toList theNodeIds)
-                                                 (Set.toList sPairs)
-                                                 (Set.toList tPairs)
-                                                 (constraintsToZ3 constraints)
-          -- print r
+--   -- toZ3 (lhs@(Atom_E' _) `SetConstr` SE_Union x y) =
+--   --   forallQuantifyFreeVars lhs $ \vars -> do
+--   --     the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
+--   --     mkEq <$> applySetRelation lhs vars <!> pure the_or
 
 
-          putStrLn $ genDOT' constraints
-          hPrint stderr r
 
-          -- case modelStr_maybe of
-          --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
-          --   Right modelStr -> do
-          --     putStrLn $ "Model:\n" <> modelStr
+--   toZ3 (lhs `SetConstr` SetFamily x) =
+--     forallQuantifyFreeVars lhs $ \vars ->
+--       mkEq <$> applySetRelation lhs vars <!> applySetRelation x vars
+
+--   -- toZ3 (_ `SetConstr` SE_Atom (SingleVar _)) = error "Assignment of a set family other than E to a singleton containing a variable (not a pair)"
+
+--   toZ3 (lhs `SetConstr` SetUnion x y) =
+--     forallQuantifyFreeVars lhs $ \vars -> do
+--       the_or <- z3M mkOr [applySetRelation x vars, applySetRelation y vars]
+--       mkEq <$> applySetRelation lhs vars <!> pure the_or
+
+--   toZ3 (lhs `SetConstr` SetUnionSingle x v0 s0) = do
+
+--     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+--     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+--     let vs = [v_var, s_var]
+
+--     mkForallConst [] [v_sym, s_sym]
+--       =<< (mkIte <$> z3M mkAnd [mkEq v_var =<< toZ3 v0, mkEq s_var =<< toZ3 s0]
+--                  <*> (mkEq <$> applySetRelation lhs vs <!> mkTrue)
+--                  <!> (mkEq <$> applySetRelation lhs vs <!> applySetRelation x vs))
+
+--   toZ3 (lhs `SetConstr` SetIte (LatticeEqual sensX sensY) t f) = do
+--     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+--     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+--     let vs = [v_var, s_var]
+
+--     z3_sensX <- toZ3 sensX
+--     z3_sensY <- toZ3 sensY
+
+--     eql <- mkEq z3_sensX z3_sensY
+
+--     z3_t <- applySetRelation t vs
+--     z3_f <- applySetRelation f vs
+
+--     mkForallConst [] [v_sym, s_sym]
+--       =<< (mkIte eql <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
+--                      <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
+
+--   toZ3 (lhs `SetConstr` SetIte (In (v, s) x) t f) = do
+
+--     z3_v <- toZ3 v
+--     z3_s <- toZ3 s
+
+--     cond <- applySetRelation x [z3_v, z3_s]
+
+--     (varSort, v_sym, v_var) <- mkSymVar "v" Var_Sort
+--     (sensSort, s_sym, s_var) <- mkSymVar "s" Sens_Sort
+--     let vs = [v_var, s_var]
+
+--     z3_t <- applySetRelation t vs
+--     z3_f <- applySetRelation f vs
+
+--     mkForallConst [] [v_sym, s_sym]
+--       =<< (mkIte cond <$> (mkEq <$> applySetRelation lhs vs <!> pure z3_t)
+--                       <!> (mkEq <$> applySetRelation lhs vs <!> pure z3_f))
+
+-- constraintsToZ3 :: Constraints -> Z3Converter ()
+-- constraintsToZ3 cs = do
+--   asts <- mapM toZ3 cs
+
+--   let astsZipped = zip asts [0..]
+
+--   forM_ astsZipped $ \(ast, n) -> do
+--     track <- mkFreshBoolVar $ "ast" ++ show n
+
+--     {- trackingAssert track -}
+--     assert ast
+
+-- nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
+-- nodeIdToLoc transUnit nodeId =
+--   (nodeId, fmap posOf . lookup nodeId $ foldMap (\(info, nodeId') -> [(nodeId', info)]) transUnit)
+
+-- nodeIdLocInfo :: [(NodeId, Maybe Position)] -> String
+-- nodeIdLocInfo = unlines . map go
+--   where
+--     go (nodeId, pos_maybe) = ppr nodeId ++ ": " ++
+--       case pos_maybe of
+--         Nothing -> "<no position info>"
+--         Just pos -> show pos
+
+-- getAnns :: CTranslationUnit a -> [a]
+-- getAnns = foldMap (:[])
+
+-- data GCC_NoIncludes = GCC_NoIncludes FilePath
+
+-- instance Preprocessor GCC_NoIncludes where
+--   parseCPPArgs (GCC_NoIncludes path) = parseCPPArgs (newGCC path)
+
+--   runCPP (GCC_NoIncludes path) cpp_args = do
+--     let tempFile = replaceExtension (inputFile cpp_args) "i-sed"
+
+--     (_, Just h1, _, p1) <- createProcess (proc "sed" ["s/^[[:space:]]*#[[:space:]]*include.*//", inputFile cpp_args]) { std_out = CreatePipe }
+--     (_, _, _, p2)       <- createProcess (proc path (buildCppArgs' cpp_args ++ ["-E", "-"])) { std_in = UseHandle h1 }
+
+--     waitForProcess p1
+--     waitForProcess p2
+
+-- -- Adapted from Language.C.System.GCC to avoid using the input file (so
+-- -- that stdin is used instead)
+-- buildCppArgs' :: CppArgs -> [String]
+-- buildCppArgs' (CppArgs options extra_args _tmpdir _input_file output_file_opt) =
+--        (concatMap tOption options)
+--     ++ outputFileOpt
+--     ++ extra_args
+--     where
+--     tOption (IncludeDir incl)  = ["-I",incl]
+--     tOption (Define key value) = [ "-D" ++ key ++ (if null value then "" else "=" ++ value) ]
+--     tOption (Undefine key)     = [ "-U" ++ key ]
+--     tOption (IncludeFile f)    = [ "-include", f]
+--     outputFileOpt = concat [ ["-o",output_file] | output_file <- maybeToList output_file_opt ]
+
+-- gccPath :: FilePath
+-- gccPath = "/usr/bin/gcc"
+
+-- main :: IO ()
+-- main = do
+--   let fileName = "../test.c"
+
+--   let gcc = GCC_NoIncludes gccPath
+
+--   stream_either <- runPreprocessor gcc $ CppArgs
+--     { cppOptions = []
+--     , extraOptions = ["-nostdinc"]
+--     , cppTmpDir = Nothing
+--     , inputFile = fileName
+--     , outputFile = Nothing
+--     }
+
+--   case stream_either of
+--     Left err -> putStrLn $ "Preprocessing failed: " ++ show err
+--     Right stream -> do
+--       case parseC stream (initPos fileName) of
+--         Left err -> error (show err)
+--         Right parsed -> do
+--           let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
+--               parsed'' = first (fmap snd) parsed'
+--               constraints = execConstraintGen $ transformM (constAction handleTransUnit) parsed''
+--               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
+--               theNodeIds = getNodeIds constraints
+
+--           -- putStrLn $ ppr constraints
+--           -- hPutStrLn stderr $ ppr constraints
+
+--           let tPairs = getTNodes constraints
+--               sPairs = getSPairs constraints
+
+--           (r, modelStr_maybe) <- evalZ3Converter (Set.toList (getVars constraints))
+--                                                  (Set.toList theNodeIds)
+--                                                  (Set.toList sPairs)
+--                                                  (Set.toList tPairs)
+--                                                  (constraintsToZ3 constraints)
+--           -- print r
+
+
+--           putStrLn $ genDOT' constraints
+--           hPrint stderr r
+
+--           -- case modelStr_maybe of
+--           --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
+--           --   Right modelStr -> do
+--           --     putStrLn $ "Model:\n" <> modelStr
 

@@ -37,15 +37,14 @@ import           Pattern
 import           Data.Set (Set)
 import qualified Data.Set as Set
 
-class ConstraintE p q where
-  (.=.) :: forall f a. f a -> p f a -> q f
-  -- someConstraint :: q f -> SomeConstraint f
+class ConstraintE p where
+  (.=.) :: forall f a. f a -> p f a -> SomeConstraint f
 
-instance ConstraintE SetExpr SomeConstraint where
-  x .=. y = SetConstraint (x .=. y)
+instance ConstraintE SetExpr where
+  x .=. y = SetConstraint (SetConstr x y)
 
-instance ConstraintE LatticeExpr SomeConstraint where
-  x .=. y = LatticeConstraint (x .=. y)
+instance ConstraintE LatticeExpr where
+  x .=. y = LatticeConstraint (LatticeConstr x y)
 
 class InterpretConstraint p f i where
   interpret :: p f -> i
@@ -68,12 +67,6 @@ data SetConstraint f =
 data LatticeConstraint f =
   forall a.
     LatticeConstr (f a) (LatticeExpr f a)
-
-instance ConstraintE SetExpr SetConstraint where
-  (.=.) = SetConstr
-
-instance ConstraintE LatticeExpr LatticeConstraint where
-  (.=.) = LatticeConstr
 
 data BoolExpr f where
   In :: a -> SetExpr f a -> BoolExpr f
