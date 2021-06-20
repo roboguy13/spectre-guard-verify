@@ -37,8 +37,12 @@ data SensExpr' where
   SensAtom' :: Sensitivity -> SensExpr'
   SensFamily' :: SensFamily a -> SensExpr'
 
-pattern SensAtom   s  = LatticeVal (SensAtom' s)
-pattern SensFamily sf = LatticeVal (SensFamily' sf)
+-- pattern SensAtom :: ReprC AnalysisSetFamily SensExpr => Sensitivity -> SensExpr
+-- pattern SensAtom   s  = LatticeVal' (SensAtom' s)
+-- pattern SensFamily sf = LatticeVal' (SensFamily' sf)
+
+sensAtom s = LatticeVal' (convert (SensAtom' s))
+sensFamily sf = LatticeVal' (convert (SensFamily' sf))
 
 type SensExpr = LatticeExpr AnalysisSetFamily SensExpr'
 
@@ -91,11 +95,11 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
       mapM_ (sameNode e) attrs
 
-      tell [c_exit n .=. SetUnionSingle (c_entry n) (Var hash, SensAtom Secret)]
+      tell [c_exit n .=. SetUnionSingle (c_entry n) (Var hash, sensAtom Secret)]
 
   | otherwise = do
       mapM_ (sameNode e) attrs
-      tell [c_exit n .=. SetUnionSingle (c_entry n) (Var hash, (SensAtom Public))]
+      tell [c_exit n .=. SetUnionSingle (c_entry n) (Var hash, (sensAtom Public))]
 
 handleDeclarator e = nop e
 
@@ -130,8 +134,8 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   e0 `connect` e
 
   handleExpr cv
-  tell [ c_exit n .=. ite (In (Var x, SensAtom Public) (c_entry n))
-                                    (SetUnionSingle (c_entry n) (Var x, (SensFamily (SensT (annotation e)))))
+  tell [ c_exit n .=. ite (In' (Var x, sensAtom Public) (c_entry n))
+                                    (SetUnionSingle (c_entry n) (Var x, (sensFamily (SensT (annotation e)))))
                                     (c_entry n)
        ]
     *> handleExpr e
@@ -175,7 +179,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
     go =
       [entryConstraint t
       ,c_exit l .=. SetUnion (c_entry l)
-                             (ite (SensFamily (SensT l) `LatticeEqual` SensAtom Secret)
+                             (ite (sensFamily (SensT l) `LatticeEqual` sensAtom Secret)
                                (maybeUnion (s_family l m) (s_family l))
                                (maybeUnion (c_exit m) c_exit))
       ] ++

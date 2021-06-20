@@ -16,6 +16,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
@@ -47,7 +49,7 @@ instance ConstraintE LatticeExpr where
   x .=. y = LatticeConstraint (LatticeConstr x y)
 
 class InterpretConstraint p f i where
-  interpret :: p c f -> i
+  interpretC :: p c f -> i
 
 data SomeConstraint c f where
   LatticeConstraint :: LatticeConstraint c f -> SomeConstraint c f
@@ -57,8 +59,14 @@ interpretConstraints :: forall c f i. (InterpretConstraint LatticeConstraint f i
 interpretConstraints = foldMap interpretSC
   where
     interpretSC :: SomeConstraint c f -> i
-    interpretSC (LatticeConstraint c) = interpret c
-    interpretSC (SetConstraint c) = interpret c
+    interpretSC (LatticeConstraint c) = interpretC c
+    interpretSC (SetConstraint c) = interpretC c
+
+-- class Interpret a b where
+--   interpret :: LamVar a r -> r
+
+-- class Subst a b where
+--   subst :: a -> LamVar a b -> b
 
 data SetConstraint c f =
   forall a. c a =>
@@ -68,23 +76,58 @@ data LatticeConstraint c f =
   forall a. c a =>
     LatticeConstr (f a) (LatticeExpr f a)
 
+data LamVar a r = LamVar r
+
+-- class Repr f a where
+--   type ReprM f a :: * -> *
+--   repr :: ReprM f a (f a)
+
+type family ReprC (f :: * -> *) a :: Constraint
+
+-- type family Convert (f :: * -> *) a :: Constraint
+
+class Convert t a | t -> a where
+  type family Converter t a :: * -> *
+  type family ConvertType t a = r | r -> t
+  convert :: a -> Converter t a (ConvertType t a)
+  mkVar :: Converter t a (t a)
+
+
+data Lam t where
+  Lam :: (forall f. (ReprC f a) => LamVar a (f a) -> b) -> Lam (a -> b)
+
+-- lamRepr :: forall f a b. Repr f a => (LamVar a (f a) -> b) -> ReprM f a (f a)
+-- lamRepr _ = repr
+
+data Lifted a where
+  LiftedValue :: (forall t. Convert t a => Converter t a (ConvertType t a)) -> Lifted a
+  LiftedVar :: ReprC f a => LamVar a (f a) -> Lifted a
+
 data BoolExpr f where
-  In :: a -> SetExpr f a -> BoolExpr f
+  In :: ReprC f a => Lifted a -> SetExpr f a -> BoolExpr f
   (:&&:) :: BoolExpr f -> BoolExpr f -> BoolExpr f
   LatticeEqual :: LatticeExpr f a -> LatticeExpr f a -> BoolExpr f
+
+-- in_ :: ReprC f a => (forall t. Convert t a => Converter t a (ConvertType t a)) -> SetExpr f a -> BoolExpr f
+-- in_ x xs = In (LiftedValue x) xs
+
+pattern In' x xs = In (LiftedValue x) xs
 
 data SetExpr f a where
   SetFamily :: f a -> SetExpr f a
   SetUnion :: SetExpr f a -> SetExpr f a -> SetExpr f a
   SetUnionSingle :: SetExpr f a -> a -> SetExpr f a
-  SetCompr :: (a -> b) -> (a -> BoolExpr f) -> SetExpr f a -> SetExpr f a
+  SetCompr :: ReprC f a => Lam (a -> SetExpr f b) -> Lam (a -> BoolExpr f) -> SetExpr f a -> SetExpr f b
   SetIte :: BoolExpr f -> SetExpr f a -> SetExpr f a -> SetExpr f a
   SetEmpty :: SetExpr f a
+  -- SetUnlamVar :: LamVar a r -> SetExpr f a
 
 data LatticeExpr f a where
-  LatticeVal :: a -> LatticeExpr f a
+  LatticeVal ::  ReprC f a => Lifted a -> LatticeExpr f a
   Lub :: SetExpr f a -> LatticeExpr f a
   LatticeIte :: BoolExpr f -> LatticeExpr f a -> LatticeExpr f a -> LatticeExpr f a
+
+pattern LatticeVal' x = LatticeVal (LiftedValue x)
 
 class Ite p where
   ite :: BoolExpr f -> p f a -> p f a -> p f a

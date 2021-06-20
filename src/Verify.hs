@@ -21,6 +21,8 @@
 
 -- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
+{-# OPTIONS_GHC -Wincomplete-patterns #-}
+
 import           Language.C
 import           Language.C.System.Preprocess
 import           Language.C.System.GCC
@@ -42,6 +44,7 @@ import           Data.Bifunctor
 import           Data.Typeable
 import           Data.Proxy
 import           Data.Kind
+import           Data.Constraint
 
 import qualified Data.ByteString as BS
 
@@ -353,6 +356,13 @@ class FreeVars a where
   freeVars :: f a -> Z3Converter [(Sort, App, AST)]
   mkZ3Var :: Z3Converter (Z3Var a)
 
+lamRepr :: FreeVars a => Lam (a -> b) -> Z3Converter (Z3Var a)
+lamRepr _ = mkZ3Var
+
+-- instance FreeVars a => Repr Z3Var a where
+--   type ReprM Z3Var a = Z3Converter
+--   repr = mkZ3Var
+
 mkSymVar' :: (String, Z3Sort) -> Z3Converter (App, AST)
 mkSymVar' p = do
   (_, y, z) <- uncurry mkSymVar p
@@ -362,7 +372,6 @@ instance (BaseVar a, BaseVar b, FreeVars a, FreeVars b) => FreeVars (a, b) where
   freeVars _ = (<>) <$> freeVars (Proxy @a) <*> freeVars (Proxy @b)
   mkZ3Var = Z3VarPair <$> mkSymVar' (baseVarPrefix_Sort @a Proxy)
                       <*> mkSymVar' (baseVarPrefix_Sort @b Proxy)
-    where
 
 instance FreeVars SensExpr where
   freeVars _ = do
@@ -380,6 +389,10 @@ forallQuantifyFreeVars :: forall f a. (FreeVars a) => f a -> (Z3Var a -> Z3Conve
 forallQuantifyFreeVars e k = do
   z3Var <- mkZ3Var @a
   mkForallConst [] (getZ3VarApps z3Var) =<< k z3Var
+
+forallQuantifyZ3Var :: forall f a. (FreeVars a) => Z3Var a -> Z3Converter AST -> Z3Converter AST
+forallQuantifyZ3Var z3Var m = do
+  mkForallConst [] (getZ3VarApps z3Var) =<< m
 
 class Z3Equality a b where
   z3Eq :: a -> b -> Z3Converter AST
@@ -491,6 +504,9 @@ instance ToZ3 SensExpr where
 class (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
 instance (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
 
+type instance ReprC AnalysisSetFamily a = FreeVars a
+type instance ReprC Z3Var a = FreeVars a
+
 instance ToZ3 (SetConstraint Z3Cs AnalysisSetFamily) where
   toZ3 (lhs `SetConstr` rhs) =
     forallQuantifyFreeVars lhs $ \vars ->
@@ -505,9 +521,11 @@ instance ToZ3 (SetConstraint Z3Cs AnalysisSetFamily) where
 --   SetFamily :: f a -> SetExpr f a
 --   SetUnion :: SetExpr f a -> SetExpr f a -> SetExpr f a
 --   SetUnionSingle :: SetExpr f a -> a -> SetExpr f a
---   SetCompr :: (a -> b) -> (a -> BoolExpr f) -> SetExpr f a -> SetExpr f a
+--   SetCompr :: Lam (a -> SetExpr f b) -> Lam (a -> BoolExpr f) -> SetExpr f a -> SetExpr f a
 --   SetIte :: BoolExpr f -> SetExpr f a -> SetExpr f a -> SetExpr f a
 --   SetEmpty :: SetExpr f a
+
+-- forallQuantifyFreeVars :: forall f a. (FreeVars a) => f a -> (Z3Var a -> Z3Converter AST) -> Z3Converter AST
 
 instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr AnalysisSetFamily a) where
   toZ3 (z3Var, se) =
@@ -515,6 +533,33 @@ instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr Analysis
       SetFamily sf -> toZ3 (z3Var, sf)
       SetUnion a b -> z3M mkOr [toZ3 (z3Var, a), toZ3 (z3Var, b)]
       SetUnionSingle e x -> z3M mkOr [toZ3 (z3Var, e), z3Eq z3Var x]
+      SetCompr lam@(Lam f) (Lam p) x -> do
+        v <- lamRepr lam
+        forallQuantifyZ3Var v $ do
+          body <- toZ3 (f (LamVar v))
+          cond <- toZ3 (p (LamVar v))
+
+          inX <- toZ3 (LiftedVar (LamVar v) `In` x)
+
+          mkImplies <$> (mkAnd [cond, inX]) <!> pure body
+      SetEmpty -> mkFalse
+      SetIte b t f ->
+        mkIte <$> toZ3 b <*> toZ3 t <!> toZ3 f
+
+
+-- data BoolExpr f where
+--   In :: Lifted a -> SetExpr f a -> BoolExpr f
+--   (:&&:) :: BoolExpr f -> BoolExpr f -> BoolExpr f
+--   LatticeEqual :: LatticeExpr f a -> LatticeExpr f a -> BoolExpr f
+
+-- instance toZ3 (Lifted Sensitivity) 
+
+instance ToZ3 (BoolExpr AnalysisSetFamily) where
+  toZ3 (LiftedValue x `In` xs) = do
+    x' <- toZ3 x
+    undefined
+
+instance FreeVars a => ToZ3 (SetExpr AnalysisSetFamily a) where
 
 instance FreeVars a => ToZ3 (Z3Var a, AnalysisSetFamily a) where
   toZ3 (z3Var, sf) = applySetRelation sf z3Var
