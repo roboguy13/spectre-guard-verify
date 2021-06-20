@@ -499,9 +499,11 @@ instance ToZ3 SensExpr' where
 instance ToZ3 (SensExpr Z3Cs) where
   toZ3 (LatticeVal (LiftedValue (SensAtom' x))) = toZ3 x
 
-  toZ3 s@(LatticeVal (LiftedValue w@(SensFamily' (SensT x)))) = do
+  toZ3 (LatticeVal (LiftedValue w@(SensFamily' (SensT _)))) = do
     z3_t <- lookupZ3FuncDecl w
     mkAppM z3_t []
+
+  toZ3 (Lub x) = undefined
 
 -- type Z3Cs a = (FreeVars a, Z3Equality (Z3Var a) a)
 
