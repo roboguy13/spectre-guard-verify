@@ -32,41 +32,22 @@ newtype NodeId = NodeId { getNodeId :: Integer }
 data Sensitivity = Public | Secret
   deriving (Show, Eq)
 
-data SensFamily a where
-  SensT :: NodeId -> SensFamily Sensitivity
-
-data SensExpr' where
-  SensAtom' :: Sensitivity -> SensExpr'
-  SensFamily' :: SensFamily a -> SensExpr'
-
--- pattern SensAtom :: ReprC AnalysisSetFamily SensExpr => Sensitivity -> SensExpr
-
--- pattern SensAtom :: Sensitivity -> LatticeExpr f SensExpr'
-pattern SensAtom :: c SensExpr' => Sensitivity -> SensExpr c
-pattern SensAtom   s  = LatticeVal (LiftedValue (SensAtom' s))
-
-pattern SensFamily :: c SensExpr' => SensFamily a -> SensExpr c
-pattern SensFamily sf = LatticeVal' (SensFamily' sf)
-
--- sensAtom :: Convert t SensExpr' => Sensitivity -> LatticeExpr f SensExpr'
--- sensAtom s = LatticeVal (LiftedValue (SensAtom' s))
--- sensAtom s = latticeVal' (SensAtom' s)
--- sensFamily sf = LatticeVal' (SensFamily' sf)
-
-type SensExpr c = LatticeExpr c (AnalysisSetFamily c) SensExpr'
+data SensExpr where
+  SensAtom :: Sensitivity -> SensExpr
+  SensT :: NodeId -> SensExpr
 
 -- | The set family for this analysis
-data AnalysisSetFamily c a where
-  C_Entry :: NodeId -> AnalysisSetFamily c (Var, SensExpr c)
-  C_Exit :: NodeId -> AnalysisSetFamily c (Var, SensExpr c)
+data AnalysisSetFamily a where
+  C_Entry :: NodeId -> AnalysisSetFamily (Var, SensExpr)
+  C_Exit :: NodeId -> AnalysisSetFamily (Var, SensExpr)
 
-  S_Family :: NodeId -> NodeId -> AnalysisSetFamily c (Var, SensExpr c)
-  B_Family :: NodeId -> AnalysisSetFamily c Var
+  S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Var, SensExpr)
+  B_Family :: NodeId -> AnalysisSetFamily Var
 
-pattern C_Entry' n = SetFamily (C_Entry n)
-pattern C_Exit' n = SetFamily (C_Exit n)
-pattern S_Family' m n = SetFamily (S_Family m n)
-pattern B_Family' n = SetFamily (B_Family n)
+-- pattern C_Entry' n = SetFamily (C_Entry n)
+-- pattern C_Exit' n = SetFamily (C_Exit n)
+-- pattern S_Family' m n = SetFamily (S_Family m n)
+-- pattern B_Family' n = SetFamily (B_Family n)
 
 -- class AnalysisSfExpr f where
 --   c_entry :: NodeId -> f (Var, SensExpr c)
@@ -87,14 +68,14 @@ pattern B_Family' n = SetFamily (B_Family n)
 --   s_family n = SetFamily . s_family n
 --   b_family = SetFamily . b_family
 
-type Constraints c = [SomeConstraint c (AnalysisSetFamily c)]
+type Constraints valueC repr = [ConstraintE AnalysisSetFamily SensExpr valueC repr]
 
 
-newtype ConstraintGen c a = ConstraintGen (Writer (Constraints c) a)
-  deriving (Functor, Applicative, Monad, MonadWriter (Constraints c))
+newtype ConstraintGen valueC repr a = ConstraintGen (Writer (Constraints valueC repr) a)
+  deriving (Functor, Applicative, Monad, MonadWriter (Constraints valueC repr))
 
 
-execConstraintGen :: ConstraintGen c a -> Constraints c
+execConstraintGen :: ConstraintGen valueC repr a -> Constraints valueC repr
 execConstraintGen (ConstraintGen g) = execWriter g
 
 constAction :: Applicative f => (a -> f ()) -> a -> f a
@@ -104,20 +85,20 @@ isNoSpecAttr :: Show a => CAttribute a -> Bool
 isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
 isNoSpecAttr _ = False
 
-handleDeclarator :: (c SensExpr', c (Var, SensExpr c)) => CDeclarator NodeId -> ConstraintGen c ()
+handleDeclarator :: () => CDeclarator NodeId -> ConstraintGen valueC repr ()
 handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
       mapM_ (sameNode e) attrs
 
-      tell [C_Exit n .=. SetUnionSingle (C_Entry' n) (Var hash, SensAtom Secret)]
+      tell [C_Exit n :=: unionSingle (C_Entry n) (value (Var hash, SensAtom Secret))]
 
   | otherwise = do
       mapM_ (sameNode e) attrs
-      tell [C_Exit n .=. SetUnionSingle (C_Entry' n) (Var hash, (SensAtom Public))]
+      tell [C_Exit n :=: unionSingle (C_Entry n) (Var hash, (SensAtom Public))]
 
 handleDeclarator e = nop e
 
-handleCompoundItem :: (c SensExpr', c (Var, SensExpr c)) => CCompoundBlockItem NodeId -> ConstraintGen c ()
+handleCompoundItem :: () => CCompoundBlockItem NodeId -> ConstraintGen valueC repr ()
 handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
 handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
     -- nop e
@@ -141,16 +122,16 @@ handleCompoundItem (CBlockDecl e) = nop e
 handleCompoundItem (CBlockStmt stmt) = handleStmt stmt -- pure ()
 handleCompoundItem (CNestedFunDef funDef) = handleFunDef funDef
 
-handleExpr :: (c SensExpr', c (Var, SensExpr c)) => CExpression NodeId -> ConstraintGen c ()
+handleExpr :: () => CExpression NodeId -> ConstraintGen valueC repr ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
   e0 `connect` e
 
   handleExpr cv
-  tell [ C_Exit n .=. ite (In' (Var x, SensAtom Public) (C_Entry' n))
-                                    (SetUnionSingle (C_Entry' n) (Var x, (SensFamily (SensT (annotation e)))))
-                                    (C_Entry' n)
+  tell [ C_Exit n :=: ite (In' (Var x, SensAtom Public) (C_Entry n))
+                                    (unionSingle (C_Entry n) (Var x, (SensFamily (SensT (annotation e)))))
+                                    (C_Entry n)
        ]
     *> handleExpr e
 
@@ -169,7 +150,7 @@ handleExpr expr = do
   where
     exprNodeId = annotation expr
 
-handleStmt :: (c SensExpr', c (Var, SensExpr c)) => CStatement NodeId -> ConstraintGen c ()
+handleStmt :: () => CStatement NodeId -> ConstraintGen valueC repr ()
 handleStmt e0@(CExpr (Just e) _) = do
   nop e0
   e0 `connect` e
@@ -178,7 +159,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   handleExpr cond
 
   -- e0 `connect` cond
-  tell [ C_Entry (annotation cond) .=. SetFamily (C_Entry l) ]
+  tell [ C_Entry (annotation cond) :=: (C_Entry l) ]
 
   tell go
 
@@ -192,21 +173,21 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   where
     go =
       [entryConstraint t
-      ,C_Exit l .=. SetUnion (C_Entry' l)
+      ,C_Exit l :=: union (C_Entry l)
                              (ite (SensFamily (SensT l) `LatticeEqual` SensAtom Secret)
                                (maybeUnion (S_Family' l m) (S_Family' l))
-                               (maybeUnion (C_Exit' m) C_Exit'))
+                               (maybeUnion (C_Exit m) C_Exit))
       ] ++
         case f_maybe of
           Nothing -> []
           Just f -> [entryConstraint f]
 
-    entryConstraint x = C_Entry (annotation x) .=. SetFamily (C_Entry l)
+    entryConstraint x = C_Entry (annotation x) :=: (C_Entry l)
 
     maybeUnion x g =
       case f_maybe of
         Nothing -> x
-        Just f -> SetUnion x (g (annotation f))
+        Just f -> union x (g (annotation f))
 
     p = annotation cond
     m = annotation t
@@ -235,44 +216,44 @@ handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
       mapM_ handleStmt cs
 
 -- | Generate C_Exit(n) = C_Entry(n) constraint for given node
-nop :: (c (Var, SensExpr c), Annotated f) => f NodeId -> ConstraintGen c ()
+nop :: () => f NodeId -> ConstraintGen valueC repr ()
 nop e =
   tell
-    [ C_Exit (annotation e) .=. SetFamily (C_Entry (annotation e)) ]
+    [ C_Exit (annotation e) :=: (C_Entry (annotation e)) ]
 
-connectList :: (c (Var, SensExpr c), Annotated f) => [f NodeId] -> ConstraintGen c ()
+connectList :: (Annotated f) => [f NodeId] -> ConstraintGen valueC repr ()
 connectList [] = pure ()
 connectList [_] = pure ()
 connectList (x:y:rest) = do
   connect x y
   connectList (y:rest)
 
-connect :: (c (Var, SensExpr c), Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen c ()
+connect :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen valueC repr ()
 connect x y =
   tell
-    [ C_Entry (annotation y) .=. SetFamily (C_Exit (annotation x)) ]
+    [ C_Entry (annotation y) :=: (C_Exit (annotation x)) ]
 
 -- | Combine two nodes, to behave as one
-sameNode :: (c (Var, SensExpr c), Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen c ()
+sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen valueC repr ()
 sameNode x y =
   tell
-    [ C_Entry (annotation x) .=. SetFamily (C_Entry (annotation y))
-    , C_Exit  (annotation x) .=. SetFamily (C_Exit  (annotation y))
+    [ C_Entry (annotation x) :=: (C_Entry (annotation y))
+    , C_Exit  (annotation x) :=: (C_Exit  (annotation y))
     ]
 
 -- TODO: Connect to following nodes
-handleFunDef :: (c SensExpr', c (Var, SensExpr c)) => CFunctionDef NodeId -> ConstraintGen c ()
+handleFunDef :: () => CFunctionDef NodeId -> ConstraintGen valueC repr ()
 handleFunDef e@(CFunDef _ _ _ stmt _) = do
   tell
-    [ C_Exit (annotation e) .=. SetEmpty
-    , C_Entry (annotation stmt) .=. SetFamily (C_Exit (annotation e))
+    [ C_Exit (annotation e) :=: SetEmpty
+    , C_Entry (annotation stmt) :=: (C_Exit (annotation e))
     ]
   void $ (constAction handleStmt) stmt
 
-handleExtDecl :: (c SensExpr', c (Var, SensExpr c)) => CExternalDeclaration NodeId -> ConstraintGen c ()
+handleExtDecl :: () => CExternalDeclaration NodeId -> ConstraintGen valueC repr ()
 handleExtDecl (CFDefExt funDef) = handleFunDef funDef
 handleExtDecl _ = pure ()
 
-handleTransUnit :: (c SensExpr', c (Var, SensExpr c)) => (CTranslationUnit NodeId, NodeId) -> ConstraintGen c ()
+handleTransUnit :: () => (CTranslationUnit NodeId, NodeId) -> ConstraintGen valueC repr ()
 handleTransUnit (CTranslUnit xs _, _) = void $ traverse handleExtDecl xs
 

@@ -41,6 +41,55 @@ import           Pattern
 import           Data.Set (Set)
 import qualified Data.Set as Set
 
+-- data Set a
+
+-- data BoolExpr (c :: * -> Constraint) (f :: * -> *) where
+--   In :: c a => Lifted c a -> SetExpr c f a -> BoolExpr c f
+--   (:&&:) :: BoolExpr c f -> BoolExpr c f -> BoolExpr c f
+--   LatticeEqual :: LatticeExpr c f a -> LatticeExpr c f a -> BoolExpr c f
+--
+-- data SetExpr (c :: * -> Constraint) (f :: * -> *) a where
+--   SetFamily :: f a -> SetExpr c f a
+--   SetUnion :: SetExpr c f a -> SetExpr c f a -> SetExpr c f a
+--   SetUnionSingle :: c a => SetExpr c f a -> a -> SetExpr c f a
+--   SetCompr :: {- ReprC f a => -} Lam c (a -> SetExpr c f b) -> Lam c (a -> BoolExpr c f) -> SetExpr c f a -> SetExpr c f b
+--   SetIte :: BoolExpr c f -> SetExpr c f a -> SetExpr c f a -> SetExpr c f a
+--   SetEmpty :: SetExpr c f a
+--   -- SetUnlamVar :: LamVar a r -> SetExpr f a
+--
+-- data LatticeExpr c f a where
+--   LatticeVal ::  {- ReprC f a => -} Lifted c a -> LatticeExpr c f a
+--   Lub :: SetExpr c f a -> LatticeExpr c f a
+--   LatticeIte :: BoolExpr c f -> LatticeExpr c f a -> LatticeExpr c f a -> LatticeExpr c f a
+
+class Expr set lattice (valueC :: * -> Constraint) repr where
+  value :: valueC a => a -> repr a
+
+  -- Bool language
+  in_ :: repr a -> repr (set a) -> repr Bool
+  (^&&^) :: repr Bool -> repr Bool -> repr Bool
+  equal :: valueC a => repr a -> repr a -> repr Bool
+
+  -- Set language
+  union :: repr (set a) -> repr (set a) -> repr (set a)
+  unionSingle :: repr (set a) -> repr a -> repr (set a)
+  empty :: repr (set a)
+
+  ite :: valueC a => repr Bool -> repr a -> repr a -> repr a
+
+  -- Lattice language
+  lub :: repr (set lattice) -> repr lattice
+
+data ConstraintE set lattice valueC repr where
+  (:=:) :: (Expr set lattice valueC repr, valueC a) => repr a -> repr a -> ConstraintE set lattice valueC repr
+
+-- (.=.) :: (Expr set lattice valueC repr, valueC a) => Proxy valueC -> repr a -> repr a -> ConstraintE set lattice a
+-- (.=.) Proxy x y = (:=:) x y
+
+-- class ConstraintE set lattice ty repr where
+--   (.=.) :: Expr set lattice ty repr => repr ty -> repr ty -> repr (ty := ty)
+
+{-
 class ConstraintE p where
   (.=.) :: forall c f a. c a => f a -> p c f a -> SomeConstraint c f
 
@@ -153,4 +202,5 @@ instance Ite SetExpr where
 
 instance Ite LatticeExpr where
   ite = LatticeIte
+-}
 
