@@ -63,7 +63,7 @@ import           ConstraintGen
 -- data Z3Var a = Z3Var { getZ3Var :: AST }
 
 data Z3Var a where
-  Z3VarSens :: (App, AST) -> Z3Var SensExpr
+  Z3VarSens :: (App, AST) -> Z3Var (SensExpr Z3Cs)
   Z3VarVar :: (App, AST) -> Z3Var Var
   Z3VarPair :: (App, AST) -> (App, AST) -> Z3Var (a, b)
 
@@ -99,8 +99,8 @@ data Z3Sort = Sens_Sort | Var_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
   Z3Info
-  { z3Info_setFamilyDecls :: forall a. AnalysisSetFamily a -> FuncDecl
-  , z3Info_sensExprDecls :: SensExpr -> FuncDecl
+  { z3Info_setFamilyDecls :: forall a. AnalysisSetFamily Z3Cs a -> FuncDecl
+  , z3Info_sensExprDecls :: SensExpr' -> FuncDecl
   , z3Info_varDecls :: Int -> FuncDecl
   , z3Info_nodeDecls :: NodeId -> FuncDecl
   , z3Info_sorts :: Z3Sort -> Sort
@@ -169,13 +169,14 @@ defineZ3Names vars nodeIds = do
        { z3Info_setFamilyDecls = \case
             C_Exit n -> lookup' n c_exit_fns
             C_Entry n -> lookup' n c_entry_fns
-            S x _y -> lookup' x s_fns
+            S_Family x _y -> lookup' x s_fns
             -- E x -> lookup' x e_fns
 
-       , z3Info_sensExprDecls = \case
-            SensAtom Public -> public_fn
-            SensAtom Secret -> secret_fn
-            SensFamily (SensT x) -> lookup' x t_fns
+       , z3Info_sensExprDecls = (\case
+            SensAtom' Public -> public_fn
+            SensAtom' Secret -> secret_fn
+            SensFamily' (SensT x) -> lookup' x t_fns)
+              -- :: (() => LatticeExpr AnalysisSetFamily SensExpr') -> _
 
        , z3Info_varDecls = \v -> lookup' v var_fns
        , z3Info_nodeDecls = \n -> lookup' n node_fns
@@ -296,12 +297,12 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
 
-instance forall t. Z3FuncDecl (AnalysisSetFamily t) where
+instance forall t. Z3FuncDecl (AnalysisSetFamily Z3Cs t) where
   lookupZ3FuncDecl x = do
     z3Info <- ask
     return $ z3Info_setFamilyDecls z3Info x
 
-instance Z3FuncDecl SensExpr where
+instance Z3FuncDecl SensExpr' where
   lookupZ3FuncDecl = lookupZ3' z3Info_sensExprDecls
 
 instance Z3FuncDecl Int where
@@ -325,7 +326,7 @@ z3M :: MonadZ3 z3 => ([a] -> z3 b) -> [z3 a] -> z3 b
 z3M f argsM =
   f =<< sequence argsM
 
-lookupSetFamilyFn :: AnalysisSetFamily a -> Z3Converter (FuncDecl, [AST])
+lookupSetFamilyFn :: AnalysisSetFamily Z3Cs a -> Z3Converter (FuncDecl, [AST])
 lookupSetFamilyFn sf@(C_Exit _n) = do
   f <- lookupZ3FuncDecl sf
   pure (f, [])
@@ -334,11 +335,11 @@ lookupSetFamilyFn sf@(C_Entry _n) = do
   f <- lookupZ3FuncDecl sf
   pure (f, [])
 
-lookupSetFamilyFn sf@(S _x y) = do
+lookupSetFamilyFn sf@(S_Family _x y) = do
   f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 y]
 
-applyFamilyFn :: AnalysisSetFamily a -> [AST] -> Z3Converter AST
+applyFamilyFn :: AnalysisSetFamily Z3Cs a -> [AST] -> Z3Converter AST
 applyFamilyFn sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
   mkApp sf (args ++ restArgs)
@@ -346,7 +347,7 @@ applyFamilyFn sf0 restArgs = do
 class BaseVar a where
   baseVarPrefix_Sort :: proxy a -> (String, Z3Sort)
 
-instance BaseVar SensExpr where
+instance BaseVar (SensExpr Z3Cs) where
   baseVarPrefix_Sort _ = ("s", Sens_Sort)
 
 instance BaseVar Var where
@@ -356,7 +357,7 @@ class FreeVars a where
   freeVars :: f a -> Z3Converter [(Sort, App, AST)]
   mkZ3Var :: Z3Converter (Z3Var a)
 
-lamRepr :: FreeVars a => Lam (a -> b) -> Z3Converter (Z3Var a)
+lamRepr :: FreeVars a => Lam Z3Cs (a -> b) -> Z3Converter (Z3Var a)
 lamRepr _ = mkZ3Var
 
 -- instance FreeVars a => Repr Z3Var a where
@@ -373,7 +374,7 @@ instance (BaseVar a, BaseVar b, FreeVars a, FreeVars b) => FreeVars (a, b) where
   mkZ3Var = Z3VarPair <$> mkSymVar' (baseVarPrefix_Sort @a Proxy)
                       <*> mkSymVar' (baseVarPrefix_Sort @b Proxy)
 
-instance FreeVars SensExpr where
+instance FreeVars (SensExpr Z3Cs) where
   freeVars _ = do
     x <- mkSymVar "s" Sens_Sort
     return [x]
@@ -428,7 +429,7 @@ getZ3VarApps (Z3VarPair x y) = [fst x, fst y]
 class Z3SetRelation f where
   applySetRelation :: f a -> Z3Var a -> Z3Converter AST
 
-instance Z3SetRelation AnalysisSetFamily where
+instance Z3SetRelation (AnalysisSetFamily Z3Cs) where
   applySetRelation sf args = applyFamilyFn sf (getZ3VarASTs args)
 
 -- class Z3SetRelation a where
@@ -481,6 +482,7 @@ instance Z3SetRelation AnalysisSetFamily where
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
 
+-- instance Convert Z3Var SensExpr'
 
 instance ToZ3 NodeId where
   toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
@@ -489,25 +491,29 @@ instance ToZ3 Var where
   toZ3 (Var n) = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Sensitivity where
-  toZ3 = toZ3 . (SensAtom :: Sensitivity -> SensExpr)
+  toZ3 = toZ3 . (SensAtom' :: Sensitivity -> SensExpr')
 
-instance ToZ3 SensExpr where
-  toZ3 s@(SensAtom _) =
-    mkApp <$> (lookupZ3FuncDecl s) <!> pure []
+instance ToZ3 SensExpr' where
+  toZ3 x = mkApp <$> (lookupZ3FuncDecl x) <!> pure []
 
-  toZ3 s@(SensFamily (SensT x)) = do
-    z3_t <- lookupZ3FuncDecl s
+instance ToZ3 (SensExpr Z3Cs) where
+  toZ3 (LatticeVal (LiftedValue (SensAtom' x))) = toZ3 x
+
+  toZ3 s@(LatticeVal (LiftedValue w@(SensFamily' (SensT x)))) = do
+    z3_t <- lookupZ3FuncDecl w
     mkAppM z3_t []
 
 -- type Z3Cs a = (FreeVars a, Z3Equality (Z3Var a) a)
 
-class (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
-instance (FreeVars a, Z3Equality (Z3Var a) a) => Z3Cs a
+class (FreeVars a, ToZ3 a, Z3Equality (Z3Var a) a) => Z3Cs a
+instance (FreeVars a, ToZ3 a, Z3Equality (Z3Var a) a) => Z3Cs a
 
-type instance ReprC AnalysisSetFamily a = FreeVars a
-type instance ReprC Z3Var a = FreeVars a
+-- type instance ReprC a = (ToZ3 a, FreeVars a)
 
-instance ToZ3 (SetConstraint Z3Cs AnalysisSetFamily) where
+-- type instance ReprC AnalysisSetFamily a = FreeVars a
+-- type instance ReprC Z3Var a = FreeVars a
+
+instance ToZ3 (SetConstraint Z3Cs (AnalysisSetFamily Z3Cs)) where
   toZ3 (lhs `SetConstr` rhs) =
     forallQuantifyFreeVars lhs $ \vars ->
       mkEq <$> toZ3 (vars, lhs) <!> toZ3 (vars, rhs)
@@ -527,7 +533,7 @@ instance ToZ3 (SetConstraint Z3Cs AnalysisSetFamily) where
 
 -- forallQuantifyFreeVars :: forall f a. (FreeVars a) => f a -> (Z3Var a -> Z3Converter AST) -> Z3Converter AST
 
-instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr AnalysisSetFamily a) where
+instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr Z3Cs (AnalysisSetFamily Z3Cs) a) where
   toZ3 (z3Var, se) =
     case se of
       SetFamily sf -> toZ3 (z3Var, sf)
@@ -554,14 +560,14 @@ instance (FreeVars a, Z3Equality (Z3Var a) a) => ToZ3 (Z3Var a, SetExpr Analysis
 
 -- instance toZ3 (Lifted Sensitivity) 
 
-instance ToZ3 (BoolExpr AnalysisSetFamily) where
+instance ToZ3 (BoolExpr Z3Cs (AnalysisSetFamily Z3Cs)) where
   toZ3 (LiftedValue x `In` xs) = do
     x' <- toZ3 x
     undefined
 
-instance FreeVars a => ToZ3 (SetExpr AnalysisSetFamily a) where
+instance FreeVars a => ToZ3 (SetExpr Z3Cs (AnalysisSetFamily Z3Cs) a) where
 
-instance FreeVars a => ToZ3 (Z3Var a, AnalysisSetFamily a) where
+instance FreeVars a => ToZ3 (Z3Var a, AnalysisSetFamily Z3Cs a) where
   toZ3 (z3Var, sf) = applySetRelation sf z3Var
 
 -- instance ToZ3 (SetConstraint AnalysisSetFamily) where
