@@ -90,11 +90,15 @@ class BoolExpr repr where
   (^&&^) :: repr Bool -> repr Bool -> repr Bool
   equal :: EqualCt repr a => repr a -> repr a -> repr Bool
 
+  ite :: repr Bool -> repr a -> repr a -> repr a
+
 class SetExpr repr where
   type SetCt repr :: (* -> *) -> Constraint
 
+  setValue :: SetCt repr set => set a -> repr (set a)
+
   union :: SetCt repr set => repr (set a) -> repr (set a) -> repr (set a)
-  unionSingle :: SetCt repr set => repr (set a) -> repr (set a) -> repr (set a)
+  unionSingle :: SetCt repr set => repr (set a) -> repr a -> repr (set a)
   empty :: SetCt repr set => repr (set a)
 
 class LatticeExpr repr where
@@ -102,10 +106,15 @@ class LatticeExpr repr where
 
   lub :: (SetExpr repr, SetCt repr set, LatticeCt repr a) => repr (set a) -> repr a
 
-type Expr repr = (BoolExpr repr, SetExpr repr, LatticeExpr repr)
+class Value repr where
+  type ValueCt repr :: * -> Constraint
 
-data ConstraintE where
-  (:=:) :: (Expr repr) => a -> repr a -> ConstraintE
+  value :: ValueCt repr a => a -> repr a
+
+type Expr repr = (BoolExpr repr, SetExpr repr, LatticeExpr repr, Value repr)
+
+data ConstraintE repr where
+  (:=:) :: {- (Expr repr) => -} repr a -> repr a -> ConstraintE repr
 
 -- data ConstraintE set lattice valueC repr where
 --   (:=:) :: (Expr set lattice valueC repr, valueC a) => a -> repr a -> ConstraintE set lattice valueC repr
