@@ -46,45 +46,15 @@ data AnalysisSetFamily a where
   S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Var, SensExpr)
   B_Family :: NodeId -> AnalysisSetFamily Var
 
--- pattern C_Entry' n = SetFamily (C_Entry n)
--- pattern C_Exit' n = SetFamily (C_Exit n)
--- pattern S_Family' m n = SetFamily (S_Family m n)
--- pattern B_Family' n = SetFamily (B_Family n)
-
--- class AnalysisSfExpr f where
---   c_entry :: NodeId -> f (Var, SensExpr c)
---   c_exit  :: NodeId -> f (Var, SensExpr c)
-
---   s_family :: NodeId -> NodeId -> f (Var, SensExpr c)
---   b_family :: NodeId -> f Var
-
--- instance AnalysisSfExpr (AnalysisSetFamily c) where
---   c_entry = C_Entry
---   c_exit = C_Exit
---   s_family n = S n
---   b_family = B
-
--- instance AnalysisSfExpr (SetExpr c (AnalysisSetFamily c)) where
---   c_entry = SetFamily . c_entry
---   c_exit = SetFamily . c_exit
---   s_family n = SetFamily . s_family n
---   b_family = SetFamily . b_family
-
 type Constraints repr = [ConstraintE repr]
 
 
 newtype ConstraintGen repr a = ConstraintGen (Writer (Constraints repr) a)
   deriving (Functor, Applicative, Monad, MonadWriter (Constraints repr))
 
--- type GenCs valueC repr = (valueC (Var, SensExpr), valueC SensExpr, valueC (AnalysisSetFamily (Var, SensExpr)), Expr AnalysisSetFamily SensExpr valueC repr)
---   :: Constraint
-
 type GenCs repr = (Expr repr, EqualCt repr SensExpr, SetCt repr AnalysisSetFamily, LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
   :: Constraint
 
-
--- (.=.) :: (GenCs valueC repr, valueC a) => a -> repr a -> ConstraintE AnalysisSetFamily SensExpr valueC repr
--- (.=.) = (:=:)
 
 execConstraintGen :: ConstraintGen repr a -> Constraints repr
 execConstraintGen (ConstraintGen g) = execWriter g
