@@ -20,6 +20,7 @@
 {-# LANGUAGE TypeFamilyDependencies #-}
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
 
@@ -62,26 +63,52 @@ import qualified Data.Set as Set
 --   Lub :: SetExpr c f a -> LatticeExpr c f a
 --   LatticeIte :: BoolExpr c f -> LatticeExpr c f a -> LatticeExpr c f a -> LatticeExpr c f a
 
-class Expr set lattice (valueC :: * -> Constraint) repr where
-  value :: valueC a => a -> repr a
+-- class valueC lattice => Expr set lattice (valueC :: * -> Constraint) repr where
+--   value :: valueC a => a -> repr a
+--   -- setValue :: valueC a => a -> repr (set a)
+--   -- latticeValue :: lattice -> repr lattice
 
-  -- Bool language
-  in_ :: repr a -> repr (set a) -> repr Bool
+--   -- Bool operations
+--   in_ :: repr a -> repr (set a) -> repr Bool
+--   (^&&^) :: repr Bool -> repr Bool -> repr Bool
+--   equal :: valueC a => repr a -> repr a -> repr Bool
+
+--   -- Set operations
+--   union :: repr (set a) -> repr (set a) -> repr (set a)
+--   unionSingle :: repr (set a) -> repr a -> repr (set a)
+--   empty :: repr (set a)
+
+--   ite :: valueC a => repr Bool -> repr a -> repr a -> repr a
+
+--   -- Lattice operations
+--   lub :: repr (set lattice) -> repr lattice
+
+class BoolExpr repr where
+  type EqualCt repr :: * -> Constraint
+
+  in_ :: (SetExpr repr, SetCt repr set) => repr a -> repr (set a) -> repr Bool
   (^&&^) :: repr Bool -> repr Bool -> repr Bool
-  equal :: valueC a => repr a -> repr a -> repr Bool
+  equal :: EqualCt repr a => repr a -> repr a -> repr Bool
 
-  -- Set language
-  union :: repr (set a) -> repr (set a) -> repr (set a)
-  unionSingle :: repr (set a) -> repr a -> repr (set a)
-  empty :: repr (set a)
+class SetExpr repr where
+  type SetCt repr :: (* -> *) -> Constraint
 
-  ite :: valueC a => repr Bool -> repr a -> repr a -> repr a
+  union :: SetCt repr set => repr (set a) -> repr (set a) -> repr (set a)
+  unionSingle :: SetCt repr set => repr (set a) -> repr (set a) -> repr (set a)
+  empty :: SetCt repr set => repr (set a)
 
-  -- Lattice language
-  lub :: repr (set lattice) -> repr lattice
+class LatticeExpr repr where
+  type LatticeCt repr :: * -> Constraint
 
-data ConstraintE set lattice valueC repr where
-  (:=:) :: (Expr set lattice valueC repr, valueC a) => repr a -> repr a -> ConstraintE set lattice valueC repr
+  lub :: (SetExpr repr, SetCt repr set, LatticeCt repr a) => repr (set a) -> repr a
+
+type Expr repr = (BoolExpr repr, SetExpr repr, LatticeExpr repr)
+
+data ConstraintE where
+  (:=:) :: (Expr repr) => a -> repr a -> ConstraintE
+
+-- data ConstraintE set lattice valueC repr where
+--   (:=:) :: (Expr set lattice valueC repr, valueC a) => a -> repr a -> ConstraintE set lattice valueC repr
 
 -- (.=.) :: (Expr set lattice valueC repr, valueC a) => Proxy valueC -> repr a -> repr a -> ConstraintE set lattice a
 -- (.=.) Proxy x y = (:=:) x y
