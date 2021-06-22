@@ -154,10 +154,10 @@ instance IdTrackerValue SensExpr where
   idTrackerValue (SensT n) = tellTNodes [n]
 
 instance IdTrackerValue (Var, SensExpr) where
-  idTrackerValue _ = idTrackerAny
+  idTrackerValue (v, _) = tellVars [v]
 
 instance IdTrackerValue Var where
-  idTrackerValue _ = idTrackerAny
+  idTrackerValue v = tellVars [v]
 
 instance Value IdTracker where
   type ValueCt IdTracker = IdTrackerValue

@@ -166,6 +166,7 @@ defineZ3Names vars nodeIds = do
     var_fns <- zip vars <$> getDatatypeSortConstructors var_sort
     [public_fn, secret_fn] <- getDatatypeSortConstructors sens_sort
 
+
     sens_join_sym <- mkStringSymbol "sens_join"
     sens_join <- mkFuncDecl sens_join_sym [sens_sort, sens_sort] sens_sort
 
@@ -717,6 +718,12 @@ main = do
 
           let tPairs = tNodesUsed used
               sPairs = sPairsUsed used
+
+          putStrLn $ "tNodes = " <> show tPairs
+          putStrLn $ "sPairs = " <> show sPairs
+          putStrLn $ "nodeIds = " <> show theNodeIds
+          putStrLn $ "vars = " <> show (varsUsed used)
+          -- putStrLn $ "nodeLocs = " <> show nodeLocs
 
           (r, modelStr_maybe) <- evalZ3Converter (Set.toList (varsUsed used))
                                                  (Set.toList theNodeIds)
