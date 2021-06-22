@@ -45,6 +45,7 @@ data AnalysisSetFamily a where
 
   S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Var, SensExpr)
   B_Family :: NodeId -> AnalysisSetFamily Var
+  E_Family :: NodeId -> AnalysisSetFamily Var
 
 type Constraints repr = [ConstraintE repr]
 
@@ -52,7 +53,7 @@ type Constraints repr = [ConstraintE repr]
 newtype ConstraintGen repr a = ConstraintGen (Writer (Constraints repr) a)
   deriving (Functor, Applicative, Monad, MonadWriter (Constraints repr))
 
-type GenCs repr = (Expr repr, EqualCt repr SensExpr, SetCt repr AnalysisSetFamily, SetElemCt repr (Var, SensExpr), LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
+type GenCs repr = (Expr repr, ValueCt repr Var, EqualCt repr SensExpr, SetCt repr AnalysisSetFamily, SetElemCt repr Var, ValueCt repr (AnalysisSetFamily Var), SetElemCt repr (Var, SensExpr), LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
   :: Constraint
 
 
@@ -109,6 +110,9 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
 
   e0 `connect` e
 
+  tell [ setValue (E_Family (annotation e0)) :=: union (value (E_Family (annotation cv)))
+                                                       (value (E_Family (annotation e))) ]
+
   handleExpr cv
   tell [ setValue (C_Exit n) :=: ite (in_ (value (Var x, SensAtom Public)) (value (C_Entry n)))
                                     (unionSingle (value (C_Entry n)) (value (Var x, (SensT (annotation e)))))
@@ -116,7 +120,8 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
        ]
     *> handleExpr e
 
-handleExpr e@(CVar (Ident _ x _) _) = return ()
+handleExpr e@(CVar (Ident _ x _) _) =
+  tell [ setValue (E_Family (annotation e)) :=: unionSingle empty (value (Var x)) ]
 
 handleExpr expr = do
   nop expr
@@ -125,6 +130,7 @@ handleExpr expr = do
   forM_ theChildren $ \c -> do
     -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
     sameNode c expr
+    tell [ setValue (E_Family (annotation c)) :=: value (E_Family (annotation expr)) ]
     handleExpr c
   -- mapM_ handleExpr $ children expr
   -- go nodeIds
@@ -146,7 +152,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
 
   handleStmt t
 
-  -- tell [atom_e (annotation e0) :=: atom_e (annotation cond)]
+  tell [setValue (E_Family (annotation e0)) :=: value (E_Family (annotation cond))]
 
   case f_maybe of
     Nothing -> pure ()

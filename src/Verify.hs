@@ -210,6 +210,21 @@ defineZ3Names vars nodeIds = do
        , z3Info_varSens_sensProj = varSens_sens
        }
 
+tDef :: NodeId -> ConstraintE Z3Repr
+tDef n =
+  toZ3Repr (SensT n) :=: rhs
+  where
+    rhs :: Z3Repr SensExpr
+    rhs =
+      lub (setCompr
+              (z3ReprLift varSens_sensProj)
+
+              (\v -> z3ReprLift varSens_sensProj v
+                      `in_`
+                     value (E_Family n))
+
+              (toZ3Repr (C_Entry n)))
+
 -- consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
 -- consistentSensitivity nodeIds f = do
 --   true <- mkTrue
@@ -343,6 +358,16 @@ lookupZ3' accessor x = do
 lookupZ3Sort :: Z3Sort -> Z3Converter Sort
 lookupZ3Sort = lookupZ3' z3Info_sorts
 
+varSens_varProj :: AST -> Z3Converter AST
+varSens_varProj varSens = do
+  proj <- z3Info_varSens_varProj <$> ask
+  mkApp proj [varSens]
+
+varSens_sensProj :: AST -> Z3Converter AST
+varSens_sensProj varSens = do
+  proj <- z3Info_varSens_sensProj <$> ask
+  mkApp proj [varSens]
+
 mkAppM :: MonadZ3 z3 => FuncDecl -> [z3 AST] -> z3 AST
 mkAppM decl = z3M (mkApp decl)
 
@@ -473,11 +498,14 @@ instance ToZ3 SensExpr where
 instance ToZ3 (AnalysisSetFamily a) where
   toZ3 = (`applyFamilyFn` [])
 
-newtype Z3Repr a = Z3Repr { getZ3Repr :: Z3Converter AST }
+newtype Z3Repr (a :: *) = Z3Repr { getZ3Repr :: Z3Converter AST }
   deriving (Functor)
 
--- toZ3Repr :: ToZ3 a => a -> Z3Repr a
--- toZ3Repr = Z3Repr . toZ3
+toZ3Repr :: ToZ3 a => a -> Z3Repr a
+toZ3Repr = Z3Repr . toZ3
+
+z3ReprLift :: (AST -> Z3Converter AST) -> (Z3Repr a -> Z3Repr b)
+z3ReprLift f xM = Z3Repr (f =<< getZ3Repr xM)
 
 z3ReprLift2 :: (AST -> AST -> Z3Converter AST) -> (Z3Repr a -> Z3Repr b -> Z3Repr c)
 z3ReprLift2 f xM yM = Z3Repr (f <$> getZ3Repr xM <!> getZ3Repr yM)
@@ -539,6 +567,16 @@ instance GetSort (Var, SensExpr) where
 -- instance Z3Set (BaseSet SensExpr) where
 --   getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Sens_Sort
 
+class Z3Value a where
+  z3Value :: a -> Z3Repr a
+
+instance Z3Value (AnalysisSetFamily Var) where
+  z3Value = toZ3Repr
+
+instance Value Z3Repr where
+  type ValueCt Z3Repr = Z3Value
+  value = undefined
+
 instance SetExpr Z3Repr where
   type SetCt Z3Repr = Z3Set
   type SetElemCt Z3Repr = GetSort
@@ -566,7 +604,13 @@ instance SetExpr Z3Repr where
         (mkImplies <$> (z3M mkAnd [mkSetMember x s, pure pX])
                    <!> pure fX)
 
+instance LatticeExpr Z3Repr where
+  type LatticeCt Z3Repr = ((~) SensExpr)
 
+  lub set = undefined
+
+-- test :: Z3Repr (AnalysisSetFamily SensExpr)
+-- test = setCompr (z3ReprLift varSens_sensProj) undefined (toZ3Repr (C_Entry undefined))
 
 {-
 instance ToZ3 (SensExpr Z3Cs) where
