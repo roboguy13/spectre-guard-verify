@@ -449,7 +449,7 @@ instance (BaseVar a, BaseVar b, FreeVars a, FreeVars b) => FreeVars (a, b) where
   mkZ3Var = Z3VarPair <$> mkSymVar' (baseVarPrefix_Sort @a Proxy)
                       <*> mkSymVar' (baseVarPrefix_Sort @b Proxy)
 
-instance FreeVars (SensExpr) where
+instance FreeVars SensExpr where
   freeVars _ = do
     x <- mkSymVar "s" Sens_Sort
     return [x]
@@ -514,6 +514,10 @@ instance ToZ3 Sensitivity where
   toZ3 = toZ3 . (SensAtom :: Sensitivity -> SensExpr)
 
 instance ToZ3 SensExpr where
+  toZ3 s@(SensT n) = do
+    n' <- toZ3 n
+    mkApp <$> (lookupZ3FuncDecl s) <!> pure [n']
+
   toZ3 x = mkApp <$> (lookupZ3FuncDecl x) <!> pure []
 
 instance ToZ3 (AnalysisSetFamily a) where
