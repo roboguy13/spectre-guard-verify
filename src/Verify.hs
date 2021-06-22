@@ -109,6 +109,7 @@ data Z3Info =
   , z3Info_varSensConstructor :: FuncDecl
   , z3Info_varSens_varProj :: FuncDecl
   , z3Info_varSens_sensProj :: FuncDecl
+  , z3Info_sens_setJoin :: FuncDecl
   }
 
 newtype Z3Converter a = Z3Converter (ReaderT Z3Info (StateT Int Z3) a)
@@ -125,6 +126,8 @@ defineZ3Names vars nodeIds = do
     t_sym <- mkStringSymbol "T"
 
     -- e_syms <- makeSyms "E" nodeIdNums
+    e_sym <- mkStringSymbol "E"
+
     b_sym <- mkStringSymbol "B"
 
     node_syms <- makeSyms "n" nodeIdNums
@@ -163,6 +166,33 @@ defineZ3Names vars nodeIds = do
     var_fns <- zip (map Var vars) <$> getDatatypeSortConstructors var_sort
     [public_fn, secret_fn] <- getDatatypeSortConstructors sens_sort
 
+    sens_join_sym <- mkStringSymbol "sens_join"
+    sens_join <- mkFuncDecl sens_join_sym [sens_sort, sens_sort] sens_sort
+
+    public <- mkApp public_fn []
+    secret <- mkApp secret_fn []
+
+    assert =<< (mkEq <$> (mkApp sens_join [public, public]) <!> pure public)
+    assert =<< (mkEq <$> (mkApp sens_join [secret, public]) <!> pure secret)
+    assert =<< (mkEq <$> (mkApp sens_join [public, secret]) <!> pure secret)
+    assert =<< (mkEq <$> (mkApp sens_join [secret, secret]) <!> pure secret)
+
+    sens_set_sort <- mkSetSort sens_sort
+
+    sens_setJoin_sym <- mkStringSymbol "sens_setJoin"
+    sens_setJoin <- mkFuncDecl sens_setJoin_sym [sens_set_sort] sens_sort
+
+    do
+      xs <- mkFreshVar "xs" sens_set_sort
+      xs_sym <- toApp xs
+      assert =<<
+        mkForallConst [] [xs_sym]
+          =<< (mkIte <$> (mkSetMember secret xs)
+                     <*> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure secret)
+                     <!> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure public))
+      assert =<< (mkEq <$> (z3M (mkApp sens_setJoin) [mkEmptySet sens_sort]) <!> pure public)
+
+
     bool_sort <- mkBoolSort
 
     let buildFn sorts resultSort = mapM (\n -> mkFuncDecl n sorts resultSort)
@@ -178,6 +208,8 @@ defineZ3Names vars nodeIds = do
 
     b_fn <- mkFuncDecl b_sym [node_sort] var_set_sort
 
+    e_fn <- mkFuncDecl e_sym [node_sort] var_set_sort
+
     -- e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
 
     let lookup' x xs =
@@ -191,6 +223,7 @@ defineZ3Names vars nodeIds = do
             C_Entry _n -> c_entry_fn
             S_Family _x _y -> s_fn
             B_Family _n -> b_fn
+            E_Family _n -> e_fn
 
        , z3Info_sensExprDecls = \case
             SensAtom Public -> public_fn
@@ -208,6 +241,7 @@ defineZ3Names vars nodeIds = do
        , z3Info_varSensConstructor = varSens_constructor
        , z3Info_varSens_varProj = varSens_var
        , z3Info_varSens_sensProj = varSens_sens
+       , z3Info_sens_setJoin = sens_setJoin
        }
 
 tDef :: NodeId -> ConstraintE Z3Repr
@@ -253,6 +287,20 @@ sDef m n =
                               s))
         (\_ -> true)
         (toZ3Repr (C_Exit n))
+
+consistentSensitivity :: NodeId -> Z3Converter AST
+consistentSensitivity n = do
+  (var_sort, v_sym, v) <- mkSymVar "v" Var_Sort
+  (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
+  (_, s2_sym, s2) <- mkSymVar "s2" Sens_Sort
+
+  c_exit <- toZ3 (C_Exit n)
+
+  varSens <- z3Info_varSensConstructor <$> ask
+
+  mkForallConst [] [v_sym, s_sym, s2_sym]
+    =<< (mkImplies <$> (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit])
+                   <!> (mkEq s s2))
 
 -- consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
 -- consistentSensitivity nodeIds f = do
@@ -433,6 +481,10 @@ lookupSetFamilyFn sf@(B_Family n) = do
   f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 n]
 
+lookupSetFamilyFn sf@(E_Family n) = do
+  f <- lookupZ3FuncDecl sf
+  (f,) <$> sequence [toZ3 n]
+
 applyFamilyFn :: AnalysisSetFamily a -> [AST] -> Z3Converter AST
 applyFamilyFn sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
@@ -578,10 +630,6 @@ instance BoolExpr Z3Repr where
 class Unconstrained (a :: k)
 instance Unconstrained a
 
--- data BaseSet a where
---   SensSet :: BaseSet SensExpr
---   VarSet :: BaseSet Var
-
 class Z3Set set where
   getZ3SetSort :: Proxy set -> Z3Converter Sort
   toZ3Set :: set a -> Z3Converter AST
@@ -602,23 +650,17 @@ instance GetSort SensExpr where
 instance GetSort (Var, SensExpr) where
   getElemSort _ = VarSens_Sort
 
-
-
--- instance Z3Set (BaseSet Var) where
---   getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Var_Sort
---   -- toZ3Set = toZ3
-
--- instance Z3Set (BaseSet SensExpr) where
---   getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Sens_Sort
-
 class Z3Value a where
   z3Value :: a -> Z3Repr a
 
-instance Z3Value (AnalysisSetFamily Var) where
+instance Z3Value (AnalysisSetFamily a) where
   z3Value = toZ3Repr
 
-instance Z3Value (AnalysisSetFamily SensExpr) where
-  z3Value = toZ3Repr
+-- instance Z3Value (AnalysisSetFamily SensExpr) where
+--   z3Value = toZ3Repr
+
+-- instance Z3Value (AnalysisSetFamily (Var, SensExpr)) where
+--   z3Value = toZ3Repr
 
 instance Value Z3Repr where
   type ValueCt Z3Repr = Z3Value
@@ -654,7 +696,11 @@ instance SetExpr Z3Repr where
 instance LatticeExpr Z3Repr where
   type LatticeCt Z3Repr = ((~) SensExpr)
 
-  lub set = undefined
+  lub setM = Z3Repr $ do
+    set <- getZ3Repr setM
+    setJoin <- z3Info_sens_setJoin <$> ask
+
+    mkApp setJoin [set]
 
 -- test :: Z3Repr (AnalysisSetFamily SensExpr)
 -- test = setCompr (z3ReprLift varSens_sensProj) undefined (toZ3Repr (C_Entry undefined))
