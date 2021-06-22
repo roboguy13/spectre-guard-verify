@@ -21,6 +21,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE InstanceSigs #-}
 
+{-# LANGUAGE QuantifiedConstraints #-}
+
 -- {-# OPTIONS_GHC -Wall -Wno-unused-imports #-}
 
 {-# OPTIONS_GHC -Wincomplete-patterns #-}
@@ -94,7 +96,7 @@ instance MonadZ3 m => MonadZ3 (StateT a m) where
   getSolver = lift getSolver
   getContext = lift getContext
 
-data Z3Sort = Sens_Sort | Var_Sort | VarSens_Sort | Node_Sort deriving (Show, Eq)
+data Z3Sort = Sens_Sort | Var_Sort | VarSens_Sort | VarSensSet_Sort | SensSet_Sort | VarSet_Sort | Node_Sort deriving (Show, Eq)
 
 data Z3Info =
   Z3Info
@@ -210,6 +212,7 @@ defineZ3Names vars nodeIds = do
 
     -- e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
 
+
     let lookup' x xs =
           case lookup x xs of
             Nothing -> error $ "defineZ3Names: Internal Z3 lookup failed: " ++ show x
@@ -234,6 +237,9 @@ defineZ3Names vars nodeIds = do
           Sens_Sort -> sens_sort
           Var_Sort -> var_sort
           VarSens_Sort -> varSens_sort
+          VarSensSet_Sort -> varSens_set_sort
+          VarSet_Sort -> var_set_sort
+          SensSet_Sort -> sens_set_sort
           Node_Sort -> node_sort
 
        , z3Info_varSensConstructor = varSens_constructor
@@ -322,7 +328,9 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
     mapM_ (toZ3 . uncurry sDef) sPairs
     mapM_ (toZ3 . tDef) tNodes
     mapM_ (toZ3 . bDef) (map snd sPairs)
+    liftIO $ putStrLn "!!! got here !!!"
     Z3Converter conv
+    liftIO $ putStrLn "??? but not here ???"
     correctnessCondition nodeIds
 
   str <- solverToString
@@ -562,7 +570,7 @@ instance BoolExpr Z3Repr where
     f <- getZ3Repr fM
     mkIte cond t f
 
-class Z3Set set where
+class (forall a. GetSort a => GetSort (set a)) => Z3Set set where
   getZ3SetSort :: Proxy set -> Z3Converter Sort
   toZ3Set :: set a -> Z3Converter AST
 
@@ -571,16 +579,24 @@ instance Z3Set AnalysisSetFamily where
   toZ3Set = toZ3
 
 class GetSort a where
-  getElemSort :: SetCt Z3Repr set => Z3Repr (set a) -> Z3Sort
+  getElemSort :: SetCt Z3Repr set => proxy (set a) -> Z3Sort
+  getSetSort :: proxy a -> Z3Sort
 
 instance GetSort Var where
   getElemSort _ = Var_Sort
+  getSetSort _ = VarSet_Sort
 
 instance GetSort SensExpr where
   getElemSort _ = Sens_Sort
+  getSetSort _ = SensSet_Sort
 
 instance GetSort (Var, SensExpr) where
   getElemSort _ = VarSens_Sort
+  getSetSort _ = VarSensSet_Sort
+
+instance GetSort a => GetSort (AnalysisSetFamily a) where
+  getElemSort _ = getElemSort @a @AnalysisSetFamily Proxy
+  getSetSort _ = getSetSort @a Proxy
 
 instance ToZ3 (Var, SensExpr) where
   toZ3 (v, s) = do
@@ -600,10 +616,12 @@ instance SetExpr Z3Repr where
   union = z3ReprLift2List mkSetUnion
   unionSingle = z3ReprLift2 (flip mkSetAdd)
 
-  empty :: forall (set :: * -> *) a. SetCt Z3Repr set => Z3Repr (set a)
+  empty :: forall (set :: * -> *) a. (GetSort a, SetCt Z3Repr set) => Z3Repr (set a)
   empty = Z3Repr $ do
-    sort <- getZ3SetSort (Proxy @set)
+    sort <- lookupZ3Sort $ getSetSort (Proxy @(set a))
     mkEmptySet sort
+    -- sort <- getZ3SetSort (Proxy @set)
+    -- mkEmptySet sort
 
   setCompr f p sM = Z3Repr $ do
     s <- getZ3Repr sM
@@ -611,9 +629,11 @@ instance SetExpr Z3Repr where
     (_, x_sym, x) <- mkSymVar "x" (getElemSort sM)
 
     pX <- getZ3Repr (p (Z3Repr (pure x)))
-    fX <- getZ3Repr (f (Z3Repr (pure x)))
+    let fX' = f (Z3Repr (pure x))
+    fX <- getZ3Repr fX'
 
-    set_sort <- mkSetSort =<< getSort fX
+    -- set_sort <- lookupZ3Sort VarSens_Sort --mkSetSort =<< getSort fX
+    set_sort <- lookupZ3Sort $ getSetSort fX'
 
     uniq <- get
     modify succ
