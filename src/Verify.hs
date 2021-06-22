@@ -612,7 +612,7 @@ instance Z3Value (AnalysisSetFamily Var) where
 
 instance Value Z3Repr where
   type ValueCt Z3Repr = Z3Value
-  value = undefined
+  value = z3Value
 
 instance SetExpr Z3Repr where
   type SetCt Z3Repr = Z3Set
