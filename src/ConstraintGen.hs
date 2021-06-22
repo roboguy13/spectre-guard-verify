@@ -52,7 +52,7 @@ type Constraints repr = [ConstraintE repr]
 newtype ConstraintGen repr a = ConstraintGen (Writer (Constraints repr) a)
   deriving (Functor, Applicative, Monad, MonadWriter (Constraints repr))
 
-type GenCs repr = (Expr repr, EqualCt repr SensExpr, SetCt repr (AnalysisSetFamily (Var, SensExpr)), LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
+type GenCs repr = (Expr repr, EqualCt repr SensExpr, SetCt repr AnalysisSetFamily, SetElemCt repr (Var, SensExpr), LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
   :: Constraint
 
 

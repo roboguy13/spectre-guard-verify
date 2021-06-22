@@ -506,36 +506,67 @@ instance BoolExpr Z3Repr where
 class Unconstrained (a :: k)
 instance Unconstrained a
 
-data BaseSet a where
-  SensSet :: BaseSet SensExpr
-  VarSet :: BaseSet Var
+-- data BaseSet a where
+--   SensSet :: BaseSet SensExpr
+--   VarSet :: BaseSet Var
 
-class Z3Set s where
-  getZ3SetSort :: Proxy s -> Z3Converter Sort
+class Z3Set set where
+  getZ3SetSort :: Proxy set -> Z3Converter Sort
+  toZ3Set :: set a -> Z3Converter AST
 
-  -- toZ3Set :: s -> Z3Converter AST
-
-instance Z3Set (AnalysisSetFamily a) where
+instance Z3Set AnalysisSetFamily where
   getZ3SetSort Proxy = lookupZ3Sort VarSens_Sort
-  -- toZ3Set = toZ3
+  toZ3Set = toZ3
 
-instance Z3Set (BaseSet Var) where
-  getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Var_Sort
-  -- toZ3Set = toZ3
+class GetSort a where
+  getElemSort :: SetCt Z3Repr set => Z3Repr (set a) -> Z3Sort
 
-instance Z3Set (BaseSet SensExpr) where
-  getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Sens_Sort
+instance GetSort Var where
+  getElemSort _ = Var_Sort
+
+instance GetSort SensExpr where
+  getElemSort _ = Sens_Sort
+
+instance GetSort (Var, SensExpr) where
+  getElemSort _ = VarSens_Sort
+
+
+
+-- instance Z3Set (BaseSet Var) where
+--   getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Var_Sort
+--   -- toZ3Set = toZ3
+
+-- instance Z3Set (BaseSet SensExpr) where
+--   getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Sens_Sort
 
 instance SetExpr Z3Repr where
   type SetCt Z3Repr = Z3Set
+  type SetElemCt Z3Repr = GetSort
+
+  setValue = Z3Repr . toZ3Set
 
   union = z3ReprLift2List mkSetUnion
   unionSingle = z3ReprLift2 (flip mkSetAdd)
 
-  empty :: forall set a. SetCt Z3Repr (set a) => Z3Repr (set a)
+  empty :: forall (set :: * -> *) a. SetCt Z3Repr set => Z3Repr (set a)
   empty = Z3Repr $ do
-    sort <- getZ3SetSort (Proxy @(set a))
+    sort <- getZ3SetSort (Proxy @set)
     mkEmptySet sort
+
+  setCompr f p sM = Z3Repr $ do
+    s <- getZ3Repr sM
+
+    (_, x_sym, x) <- mkSymVar "x" (getElemSort sM)
+
+    pX <- getZ3Repr (p (Z3Repr (pure x)))
+    fX <- getZ3Repr (f (Z3Repr (pure x)))
+
+    mkForallConst [] [x_sym]
+      =<<
+        (mkImplies <$> (z3M mkAnd [mkSetMember x s, pure pX])
+                   <!> pure fX)
+
+
 
 {-
 instance ToZ3 (SensExpr Z3Cs) where
