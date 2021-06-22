@@ -219,11 +219,22 @@ tDef n =
       lub (setCompr
               (z3ReprLift varSens_sensProj)
 
-              (\v -> z3ReprLift varSens_sensProj v
-                      `in_`
-                     value (E_Family n))
+              (\vs -> z3ReprLift varSens_sensProj vs
+                       `in_`
+                      value (E_Family n))
 
               (toZ3Repr (C_Entry n)))
+
+bDef :: NodeId -> ConstraintE Z3Repr
+bDef n =
+  toZ3Repr (B_Family n) :=: rhs
+  where
+    rhs :: Z3Repr (AnalysisSetFamily Var)
+    rhs =
+      setCompr
+        (\_ -> Z3Repr mkTrue)
+        (\vs -> z3ReprLift varSens_varProj vs)
+        (toZ3Repr (C_Exit n))
 
 -- consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
 -- consistentSensitivity nodeIds f = do
