@@ -103,7 +103,7 @@ data Z3Info =
   Z3Info
   { z3Info_setFamilyDecls :: forall a. AnalysisSetFamily a -> FuncDecl
   , z3Info_sensExprDecls :: SensExpr -> FuncDecl
-  , z3Info_varDecls :: Int -> FuncDecl
+  , z3Info_varDecls :: Var -> FuncDecl
   , z3Info_nodeDecls :: NodeId -> FuncDecl
   , z3Info_sorts :: Z3Sort -> Sort
   , z3Info_varSensConstructor :: FuncDecl
@@ -124,7 +124,8 @@ defineZ3Names vars nodeIds = do
     s_sym <- mkStringSymbol "S"
     t_sym <- mkStringSymbol "T"
 
-    e_syms <- makeSyms "E" nodeIdNums
+    -- e_syms <- makeSyms "E" nodeIdNums
+    b_sym <- mkStringSymbol "B"
 
     node_syms <- makeSyms "n" nodeIdNums
     var_syms <- makeSyms "v" vars
@@ -159,7 +160,7 @@ defineZ3Names vars nodeIds = do
     varSens_set_sort <- mkSetSort varSens_sort
 
     node_fns <- zip nodeIds <$> getDatatypeSortConstructors node_sort
-    var_fns <- zip vars <$> getDatatypeSortConstructors var_sort
+    var_fns <- zip (map Var vars) <$> getDatatypeSortConstructors var_sort
     [public_fn, secret_fn] <- getDatatypeSortConstructors sens_sort
 
     bool_sort <- mkBoolSort
@@ -171,10 +172,13 @@ defineZ3Names vars nodeIds = do
     s_fn <- mkFuncDecl s_sym [node_sort, node_sort] varSens_set_sort
 
     sens_set_sort <- mkSetSort sens_sort
+    var_set_sort <- mkSetSort var_sort
 
     t_fn <- mkFuncDecl t_sym [node_sort] sens_sort
 
-    e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
+    b_fn <- mkFuncDecl b_sym [node_sort] var_set_sort
+
+    -- e_fns <- zip nodeIds <$> buildFn [var_sort] bool_sort e_syms
 
     let lookup' x xs =
           case lookup x xs of
@@ -186,13 +190,12 @@ defineZ3Names vars nodeIds = do
             C_Exit _n -> c_exit_fn
             C_Entry _n -> c_entry_fn
             S_Family _x _y -> s_fn
-            -- E x -> lookup' x e_fns
+            B_Family _n -> b_fn
 
        , z3Info_sensExprDecls = \case
             SensAtom Public -> public_fn
             SensAtom Secret -> secret_fn
             SensT _x -> t_fn
-              -- :: (() => LatticeExpr AnalysisSetFamily SensExpr') -> _
 
        , z3Info_varDecls = \v -> lookup' v var_fns
        , z3Info_nodeDecls = \n -> lookup' n node_fns
@@ -326,7 +329,7 @@ instance forall t. Z3FuncDecl (AnalysisSetFamily t) where
 instance Z3FuncDecl SensExpr where
   lookupZ3FuncDecl = lookupZ3' z3Info_sensExprDecls
 
-instance Z3FuncDecl Int where
+instance Z3FuncDecl Var where
   lookupZ3FuncDecl = lookupZ3' z3Info_varDecls
 
 instance Z3FuncDecl NodeId where
@@ -360,10 +363,15 @@ lookupSetFamilyFn sf@(S_Family x y) = do
   f <- lookupZ3FuncDecl sf
   (f,) <$> sequence [toZ3 x, toZ3 y]
 
+lookupSetFamilyFn sf@(B_Family n) = do
+  f <- lookupZ3FuncDecl sf
+  (f,) <$> sequence [toZ3 n]
+
 applyFamilyFn :: AnalysisSetFamily a -> [AST] -> Z3Converter AST
 applyFamilyFn sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
   mkApp sf (args ++ restArgs)
+
 
 class BaseVar a where
   baseVarPrefix_Sort :: proxy a -> (String, Z3Sort)
@@ -447,69 +455,14 @@ getZ3VarApps (Z3VarSens x) = [fst x]
 getZ3VarApps (Z3VarVar x) = [fst x]
 getZ3VarApps (Z3VarPair x y) = [fst x, fst y]
 
-class Z3SetRelation f where
-  applySetRelation :: f a -> Z3Var a -> Z3Converter AST
-
-instance Z3SetRelation (AnalysisSetFamily) where
-  applySetRelation sf args = applyFamilyFn sf (getZ3VarASTs args)
-
--- class Z3SetRelation a where
---   applySetRelation :: a -> [AST] -> Z3Converter AST
-
---   applySetRelationM :: a -> [Z3Converter AST] -> Z3Converter AST
---   applySetRelationM sr xs = applySetRelation sr =<< sequence xs
-
--- instance Z3SetRelation (AnalysisSetFamily a) where
---   applySetRelation sr = applyFamilyFnM sr . map pure
---   applySetRelationM = applyFamilyFnM
-
--- -- instance Z3SetRelation (AtomicSet a) where
--- --   applySetRelation (AnalysisSetFamily sr) args = applySetRelation sr args
--- --   applySetRelation (SingleVar i) _ = toZ3 i
-
--- instance Z3SetRelation (SetExpr AnalysisSetFamily a) where
---   applySetRelation (SetFamily sr) args = applySetRelation sr args
-
---   applySetRelation (SetUnion x y) args = do
---     z3M mkOr [applySetRelation x args, applySetRelation y args]
-
---   applySetRelation (SetUnionSingle x (v, s)) args@[v',s'] = do
---     z3_v <- toZ3 v
---     z3_s <- toZ3 s
-
---     z3M mkOr [ applySetRelation x args
---              , z3M mkAnd [mkEq z3_v v', mkEq z3_s s']
---              ]
-
---   applySetRelation (SetIte (LatticeEqual sensX sensY) t f) args = do
---     z3_sensX <- toZ3 sensX
---     z3_sensY <- toZ3 sensY
-
---     eql <- mkEq z3_sensX z3_sensY
-
---     mkIte eql <$> applySetRelation t args <!> applySetRelation f args
-
---   applySetRelation (SetIte (In (v, s) x) t f) args = do
---     z3_v <- toZ3 v
---     z3_s <- toZ3 s
-
---     cond <- applySetRelation x [z3_v, z3_s]
-
---     mkIte cond <$> applySetRelation t args <!> applySetRelation f args
-
---   applySetRelation SetEmpty _args = error "applySetRelation: SE_Empty"
-
-
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
-
--- instance Convert Z3Var SensExpr'
 
 instance ToZ3 NodeId where
   toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Var where
-  toZ3 (Var n) = mkApp <$> lookupZ3FuncDecl n <!> pure []
+  toZ3 n = mkApp <$> lookupZ3FuncDecl n <!> pure []
 
 instance ToZ3 Sensitivity where
   toZ3 = toZ3 . (SensAtom :: Sensitivity -> SensExpr)
@@ -517,6 +470,8 @@ instance ToZ3 Sensitivity where
 instance ToZ3 SensExpr where
   toZ3 x = mkApp <$> (lookupZ3FuncDecl x) <!> pure []
 
+instance ToZ3 (AnalysisSetFamily a) where
+  toZ3 = (`applyFamilyFn` [])
 
 newtype Z3Repr a = Z3Repr { getZ3Repr :: Z3Converter AST }
   deriving (Functor)
@@ -551,15 +506,25 @@ instance BoolExpr Z3Repr where
 class Unconstrained (a :: k)
 instance Unconstrained a
 
-class Z3Set (set :: * -> *) where
-  getZ3SetSort :: Proxy set -> Z3Converter Sort
+data BaseSet a where
+  SensSet :: BaseSet SensExpr
+  VarSet :: BaseSet Var
 
-  toZ3Set :: set a -> Z3Converter AST
+class Z3Set s where
+  getZ3SetSort :: Proxy s -> Z3Converter Sort
 
-instance Z3Set AnalysisSetFamily where
+  -- toZ3Set :: s -> Z3Converter AST
+
+instance Z3Set (AnalysisSetFamily a) where
   getZ3SetSort Proxy = lookupZ3Sort VarSens_Sort
+  -- toZ3Set = toZ3
 
-  -- toZ3Set 
+instance Z3Set (BaseSet Var) where
+  getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Var_Sort
+  -- toZ3Set = toZ3
+
+instance Z3Set (BaseSet SensExpr) where
+  getZ3SetSort Proxy = mkSetSort =<< lookupZ3Sort Sens_Sort
 
 instance SetExpr Z3Repr where
   type SetCt Z3Repr = Z3Set
@@ -567,9 +532,9 @@ instance SetExpr Z3Repr where
   union = z3ReprLift2List mkSetUnion
   unionSingle = z3ReprLift2 (flip mkSetAdd)
 
-  empty :: forall (set :: * -> *) a. SetCt Z3Repr set => Z3Repr (set a)
+  empty :: forall set a. SetCt Z3Repr (set a) => Z3Repr (set a)
   empty = Z3Repr $ do
-    sort <- getZ3SetSort (Proxy @set)
+    sort <- getZ3SetSort (Proxy @(set a))
     mkEmptySet sort
 
 {-

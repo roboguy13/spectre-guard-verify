@@ -42,27 +42,27 @@ import           Pattern
 class BoolExpr repr where
   type EqualCt repr :: * -> Constraint
 
-  in_ :: (SetExpr repr, SetCt repr set) => repr a -> repr (set a) -> repr Bool
+  in_ :: (SetExpr repr, SetCt repr (set a)) => repr a -> repr (set a) -> repr Bool
   (^&&^) :: repr Bool -> repr Bool -> repr Bool
   equal :: EqualCt repr a => repr a -> repr a -> repr Bool
 
   ite :: repr Bool -> repr a -> repr a -> repr a
 
 class SetExpr repr where
-  type SetCt repr :: (* -> *) -> Constraint
+  type SetCt repr :: * -> Constraint
 
-  setValue :: SetCt repr set => set a -> repr (set a)
+  setValue :: SetCt repr (set a) => set a -> repr (set a)
 
-  union :: SetCt repr set => repr (set a) -> repr (set a) -> repr (set a)
-  unionSingle :: SetCt repr set => repr (set a) -> repr a -> repr (set a)
-  empty :: SetCt repr set => repr (set a)
+  union :: SetCt repr (set a) => repr (set a) -> repr (set a) -> repr (set a)
+  unionSingle :: SetCt repr (set a) => repr (set a) -> repr a -> repr (set a)
+  empty :: SetCt repr (set a) => repr (set a)
 
-  setCompr :: SetCt repr set => (repr a -> repr b) -> (repr a -> repr Bool) -> repr (set a) -> repr (set b)
+  setCompr :: (SetCt repr (set a), SetCt repr (set b)) => (repr a -> repr b) -> (repr a -> repr Bool) -> repr (set a) -> repr (set b)
 
 class LatticeExpr repr where
   type LatticeCt repr :: * -> Constraint
 
-  lub :: (SetExpr repr, SetCt repr set, LatticeCt repr a) => repr (set a) -> repr a
+  lub :: (SetExpr repr, SetCt repr (set a), LatticeCt repr a) => repr (set a) -> repr a
 
 class Value repr where
   type ValueCt repr :: * -> Constraint
