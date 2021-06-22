@@ -247,7 +247,7 @@ sDef m n =
             let (v, s) = (varSens_varProj vs
                          ,varSens_sensProj vs)
             in
-            z3ReprLift2 varSens_pair v
+            varSens_pair v
                          (ite (v `in_` toZ3Repr (B_Family m))
                               (toZ3Repr (SensAtom Secret))
                               s))
@@ -390,8 +390,10 @@ lookupZ3Sort = lookupZ3' z3Info_sorts
 
   -- , z3Info_varSensConstructor :: FuncDecl
 
-varSens_pair :: AST -> AST -> Z3Converter AST
-varSens_pair x y = do
+varSens_pair :: Z3Repr Var -> Z3Repr SensExpr -> Z3Repr (Var, SensExpr)
+varSens_pair xM yM = Z3Repr $ do
+  x <- getZ3Repr xM
+  y <- getZ3Repr yM
   construct <- z3Info_varSensConstructor <$> ask
   mkApp construct [x, y]
 
