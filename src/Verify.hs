@@ -232,8 +232,26 @@ bDef n =
     rhs :: Z3Repr (AnalysisSetFamily Var)
     rhs =
       setCompr
-        (\_ -> Z3Repr mkTrue)
         (\vs -> z3ReprLift varSens_varProj vs)
+        (\_ -> Z3Repr mkTrue)
+        (toZ3Repr (C_Exit n))
+
+sDef :: NodeId -> NodeId -> ConstraintE Z3Repr
+sDef m n =
+  toZ3Repr (S_Family m n) :=: rhs
+  where
+    rhs :: Z3Repr (AnalysisSetFamily (Var, SensExpr))
+    rhs =
+      setCompr
+        (\vs ->
+            let (v, s) = (z3ReprLift varSens_varProj vs
+                         ,z3ReprLift varSens_sensProj vs)
+            in
+            z3ReprLift2 varSens_pair v
+                         (ite (v `in_` toZ3Repr (B_Family m))
+                              (toZ3Repr Secret)
+                              s))
+        (\_ -> Z3Repr mkTrue)
         (toZ3Repr (C_Exit n))
 
 -- consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
@@ -368,6 +386,14 @@ lookupZ3' accessor x = do
 
 lookupZ3Sort :: Z3Sort -> Z3Converter Sort
 lookupZ3Sort = lookupZ3' z3Info_sorts
+
+
+  -- , z3Info_varSensConstructor :: FuncDecl
+
+varSens_pair :: AST -> AST -> Z3Converter AST
+varSens_pair x y = do
+  construct <- z3Info_varSensConstructor <$> ask
+  mkApp construct [x, y]
 
 varSens_varProj :: AST -> Z3Converter AST
 varSens_varProj varSens = do
