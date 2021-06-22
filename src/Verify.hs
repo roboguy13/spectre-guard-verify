@@ -201,7 +201,6 @@ defineZ3Names vars nodeIds = do
     c_entry_fn <- mkFuncDecl c_entry_sym [node_sort] varSens_set_sort
     s_fn <- mkFuncDecl s_sym [node_sort, node_sort] varSens_set_sort
 
-    sens_set_sort <- mkSetSort sens_sort
     var_set_sort <- mkSetSort var_sort
 
     t_fn <- mkFuncDecl t_sym [node_sort] sens_sort
