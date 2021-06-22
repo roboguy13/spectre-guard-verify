@@ -71,7 +71,7 @@ instance Semigroup UsedIds where
       { tNodesUsed  = tNodesUsed  x <> tNodesUsed  y
       , sPairsUsed  = sPairsUsed  x <> sPairsUsed  y
       , varsUsed    = varsUsed    x <> varsUsed    y
-      , nodeIdsUsed = nodeIdsUsed x <> nodeIdsUsed x
+      , nodeIdsUsed = nodeIdsUsed x <> nodeIdsUsed y
       }
 
 instance Monoid UsedIds where
