@@ -57,6 +57,8 @@ class SetExpr repr where
   unionSingle :: SetCt repr set => repr (set a) -> repr a -> repr (set a)
   empty :: SetCt repr set => repr (set a)
 
+  setCompr :: SetCt repr set => (repr a -> repr b) -> (repr a -> repr Bool) -> repr (set a) -> repr (set b)
+
 class LatticeExpr repr where
   type LatticeCt repr :: * -> Constraint
 
