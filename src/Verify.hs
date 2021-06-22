@@ -596,7 +596,7 @@ instance SetExpr Z3Repr where
 
   empty :: forall (set :: * -> *) a. (GetSort a, SetCt Z3Repr set) => Z3Repr (set a)
   empty = Z3Repr $ do
-    sort <- lookupZ3Sort $ getSetSort (Proxy @(set a))
+    sort <- lookupZ3Sort $ getElemSort (Proxy @(set a))
     mkEmptySet sort
     -- sort <- getZ3SetSort (Proxy @set)
     -- mkEmptySet sort
@@ -663,7 +663,8 @@ constraintsToZ3 cs = do
         liftIO $ putStrLn "constraints to z3"
         -- _
         c' <- toZ3 c
-        liftIO $ print c')
+        c_str <- astToString c'
+        liftIO $ putStrLn $ "constraint ast: " ++ c_str)
   -- asts <- mapM toZ3 cs
   -- liftIO $ print asts
   return ()
