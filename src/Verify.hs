@@ -610,6 +610,9 @@ class Z3Value a where
 instance Z3Value (AnalysisSetFamily Var) where
   z3Value = toZ3Repr
 
+instance Z3Value (AnalysisSetFamily SensExpr) where
+  z3Value = toZ3Repr
+
 instance Value Z3Repr where
   type ValueCt Z3Repr = Z3Value
   value = z3Value
