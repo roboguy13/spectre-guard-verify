@@ -75,9 +75,6 @@ f <!> x = join (f <*> x)
 
 mkSymVar :: String -> Z3Sort -> Z3Converter (Sort, App, AST)
 mkSymVar name z3sort = do
-  uniq <- get
-  modify succ
-
   sort <- lookupZ3Sort z3sort
 
   var <- mkFreshVar name sort
@@ -612,10 +609,21 @@ instance SetExpr Z3Repr where
     pX <- getZ3Repr (p (Z3Repr (pure x)))
     fX <- getZ3Repr (f (Z3Repr (pure x)))
 
-    mkForallConst [] [x_sym]
+    set_sort <- mkSetSort =<< getSort fX
+
+    uniq <- get
+    modify succ
+
+    compr_sym <- mkStringSymbol ("compr" <> show uniq)
+
+    compr <- mkConst compr_sym set_sort
+
+    assert =<< (mkForallConst [] [x_sym]
       =<<
-        (mkImplies <$> (z3M mkAnd [mkSetMember x s, pure pX])
-                   <!> pure fX)
+        (mkIff <$> (z3M mkAnd [mkSetMember x s, pure pX])
+               <!> (mkSetMember fX compr)))
+
+    return compr
 
 instance LatticeExpr Z3Repr where
   type LatticeCt Z3Repr = ((~) SensExpr)
