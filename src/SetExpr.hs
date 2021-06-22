@@ -39,6 +39,9 @@ import           Data.Semigroup
 import           Ppr
 import           Pattern
 
+class Unconstrained (a :: k)
+instance Unconstrained a
+
 class BoolExpr repr where
   type EqualCt repr :: * -> Constraint
 

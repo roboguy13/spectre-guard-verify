@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE OverloadedLists #-}
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
@@ -20,6 +21,9 @@ import           Data.Constraint
 
 import           Control.Monad.Writer
 import           Data.Generics.Uniplate.Data
+
+import           Data.Set (Set)
+import qualified Data.Set as Set
 
 import           Data.Maybe
 
@@ -49,6 +53,67 @@ data AnalysisSetFamily a where
 
 type Constraints repr = [ConstraintE repr]
 
+data UsedIds =
+  UsedIds
+    { tNodesUsed :: Set NodeId
+    , sPairsUsed :: Set (NodeId, NodeId)
+    , varsUsed :: Set Var
+    , nodeIdsUsed :: Set NodeId
+    }
+
+instance Semigroup UsedIds where
+  x <> y =
+    UsedIds
+      { tNodesUsed  = tNodesUsed  x <> tNodesUsed  y
+      , sPairsUsed  = sPairsUsed  x <> sPairsUsed  y
+      , varsUsed    = varsUsed    x <> varsUsed    y
+      , nodeIdsUsed = nodeIdsUsed x <> nodeIdsUsed x
+      }
+
+instance Monoid UsedIds where
+  mempty = UsedIds mempty mempty mempty mempty
+
+data ConstraintGenResults repr =
+  ConstraintGenResults
+    { cgUsed :: UsedIds
+    , cgConstraints :: Constraints repr
+    }
+
+instance Semigroup (ConstraintGenResults repr) where
+  x <> y =
+    ConstraintGenResults
+      { cgUsed = cgUsed x <> cgUsed y
+      , cgConstraints = cgConstraints x <> cgConstraints y
+      }
+
+instance Monoid (ConstraintGenResults repr) where
+  mempty =
+    ConstraintGenResults
+      { cgUsed = mempty
+      , cgConstraints = mempty
+      }
+
+newtype IdTracker a = IdTracker { runIdTracker :: Writer UsedIds () }
+
+instance Semigroup (IdTracker a) where
+  IdTracker x <> IdTracker y = IdTracker (x >> y)
+
+tellTNodes :: Set NodeId -> IdTracker a
+tellTNodes ns = IdTracker $ do
+  tell mempty { tNodesUsed = ns }
+  runIdTracker $ tellNodeIds ns
+
+tellSPairs :: Set (NodeId, NodeId) -> IdTracker a
+tellSPairs sp = IdTracker $ do
+  tell mempty { sPairsUsed = sp }
+  runIdTracker $ tellNodeIds (Set.map fst sp)
+  runIdTracker $ tellNodeIds (Set.map snd sp)
+
+tellVars :: Set Var -> IdTracker a
+tellVars vs = IdTracker $ tell mempty { varsUsed = vs }
+
+tellNodeIds :: Set NodeId -> IdTracker a
+tellNodeIds ns = IdTracker $ tell mempty { nodeIdsUsed = ns }
 
 newtype ConstraintGen repr a = ConstraintGen (Writer (Constraints repr) a)
   deriving (Functor, Applicative, Monad, MonadWriter (Constraints repr))
@@ -56,9 +121,86 @@ newtype ConstraintGen repr a = ConstraintGen (Writer (Constraints repr) a)
 type GenCs repr = (Expr repr, ValueCt repr Var, EqualCt repr SensExpr, SetCt repr AnalysisSetFamily, SetElemCt repr Var, ValueCt repr (AnalysisSetFamily Var), SetElemCt repr (Var, SensExpr), LatticeCt repr SensExpr, ValueCt repr (Var, SensExpr), ValueCt repr (AnalysisSetFamily (Var, SensExpr)), ValueCt repr SensExpr)
   :: Constraint
 
+-- tellUsed :: UsedIds -> ConstraintGen repr ()
+-- tellUsed used = tell (mempty { cgUsed = used })
 
-execConstraintGen :: ConstraintGen repr a -> Constraints repr
-execConstraintGen (ConstraintGen g) = execWriter g
+-- tellTNodesUsed :: [NodeId] -> ConstraintGen repr ()
+-- tellTNodesUsed ns = tellUsed (mempty { tNodesUsed = ns })
+
+-- tellSPairsUsed :: [(NodeId, NodeId)]
+
+class IdTrackerValue a where
+  idTrackerValue :: a -> IdTracker a
+
+idTrackerAny :: IdTracker a
+idTrackerAny = IdTracker $ return ()
+
+retag :: IdTracker a -> IdTracker b
+retag (IdTracker x) = IdTracker x
+
+instance IdTrackerValue (AnalysisSetFamily a) where
+  idTrackerValue (C_Entry n) = tellNodeIds [n]
+  idTrackerValue (C_Exit n)  = tellNodeIds [n]
+  idTrackerValue (S_Family m n) = tellSPairs [(m, n)]
+  idTrackerValue (B_Family n) = tellNodeIds [n]
+  idTrackerValue (E_Family n) = tellNodeIds [n]
+
+instance IdTrackerValue SensExpr where
+  idTrackerValue (SensAtom _) = idTrackerAny
+  idTrackerValue (SensT n) = tellTNodes [n]
+
+instance IdTrackerValue (Var, SensExpr) where
+  idTrackerValue _ = idTrackerAny
+
+instance IdTrackerValue Var where
+  idTrackerValue _ = idTrackerAny
+
+instance Value IdTracker where
+  type ValueCt IdTracker = IdTrackerValue
+  value = idTrackerValue
+
+instance BoolExpr IdTracker where
+  type EqualCt IdTracker = ((~) SensExpr)
+
+  x `in_` xs = retag (x <> retag xs)
+  x ^&&^ y = x <> y
+  true = idTrackerAny
+  false = idTrackerAny
+  x `equal` y = retag (x <> y)
+  ite c t f = retag (c <> retag t <> retag f)
+
+class IdTrackerSet set where
+  idTrackerSetValue :: set a -> IdTracker (set a)
+
+instance IdTrackerSet AnalysisSetFamily where
+  idTrackerSetValue = value
+
+instance SetExpr IdTracker where
+  type SetCt IdTracker = IdTrackerSet
+  type SetElemCt IdTracker = Unconstrained
+
+  setValue = idTrackerSetValue
+  x `union` y = x <> y
+  x `unionSingle` y = x <> retag y
+  empty = idTrackerAny
+  setCompr f p z = retag (f idTrackerAny) <> retag (p idTrackerAny) <> retag z
+
+instance LatticeExpr IdTracker where
+  type LatticeCt IdTracker = Unconstrained
+  lub xs = retag xs
+
+execIdTracker :: ConstraintGen IdTracker a -> UsedIds
+execIdTracker (ConstraintGen g) = mconcat $ map go $ execWriter g
+  where
+    go :: ConstraintE IdTracker -> UsedIds
+    go (IdTracker x :=: IdTracker y) = execWriter x <> execWriter y
+
+execConstraintGen :: GenCs repr => (forall r. GenCs r => ConstraintGen r a) -> ConstraintGenResults repr
+execConstraintGen cg@(ConstraintGen g) =
+  ConstraintGenResults
+    { cgConstraints = execWriter g
+    , cgUsed = execIdTracker cg
+    }
 
 constAction :: Applicative f => (a -> f ()) -> a -> f a
 constAction f x = f x *> pure x
