@@ -217,9 +217,9 @@ tDef n =
     rhs :: Z3Repr SensExpr
     rhs =
       lub (setCompr
-              (z3ReprLift varSens_sensProj)
+              varSens_sensProj
 
-              (\vs -> z3ReprLift varSens_sensProj vs
+              (\vs -> varSens_varProj vs
                        `in_`
                       value (E_Family n))
 
@@ -232,8 +232,8 @@ bDef n =
     rhs :: Z3Repr (AnalysisSetFamily Var)
     rhs =
       setCompr
-        (\vs -> z3ReprLift varSens_varProj vs)
-        (\_ -> Z3Repr mkTrue)
+        (\vs -> varSens_varProj vs)
+        (\_ -> true)
         (toZ3Repr (C_Exit n))
 
 sDef :: NodeId -> NodeId -> ConstraintE Z3Repr
@@ -244,14 +244,14 @@ sDef m n =
     rhs =
       setCompr
         (\vs ->
-            let (v, s) = (z3ReprLift varSens_varProj vs
-                         ,z3ReprLift varSens_sensProj vs)
+            let (v, s) = (varSens_varProj vs
+                         ,varSens_sensProj vs)
             in
             z3ReprLift2 varSens_pair v
                          (ite (v `in_` toZ3Repr (B_Family m))
-                              (toZ3Repr Secret)
+                              (toZ3Repr (SensAtom Secret))
                               s))
-        (\_ -> Z3Repr mkTrue)
+        (\_ -> true)
         (toZ3Repr (C_Exit n))
 
 -- consistentSensitivity :: (Z3SetRelation a) => [NodeId] -> (NodeId -> a) -> Z3Converter [AST]
@@ -395,13 +395,15 @@ varSens_pair x y = do
   construct <- z3Info_varSensConstructor <$> ask
   mkApp construct [x, y]
 
-varSens_varProj :: AST -> Z3Converter AST
-varSens_varProj varSens = do
+varSens_varProj :: Z3Repr (Var, SensExpr) -> Z3Repr Var
+varSens_varProj varSensM = Z3Repr $ do
+  varSens <- getZ3Repr varSensM
   proj <- z3Info_varSens_varProj <$> ask
   mkApp proj [varSens]
 
-varSens_sensProj :: AST -> Z3Converter AST
-varSens_sensProj varSens = do
+varSens_sensProj :: Z3Repr (Var, SensExpr) -> Z3Repr SensExpr
+varSens_sensProj varSensM = Z3Repr $ do
+  varSens <- getZ3Repr varSensM
   proj <- z3Info_varSens_sensProj <$> ask
   mkApp proj [varSens]
 
@@ -561,6 +563,9 @@ instance BoolExpr Z3Repr where
   (^&&^) = z3ReprLift2List mkAnd
 
   equal = z3ReprLift2 mkEq
+
+  true = Z3Repr mkTrue
+  false = Z3Repr mkFalse
 
   ite condM tM fM = Z3Repr $ do
     cond <- getZ3Repr condM

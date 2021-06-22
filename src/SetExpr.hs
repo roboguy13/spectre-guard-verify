@@ -46,6 +46,9 @@ class BoolExpr repr where
   (^&&^) :: repr Bool -> repr Bool -> repr Bool
   equal :: EqualCt repr a => repr a -> repr a -> repr Bool
 
+  true :: repr Bool
+  false :: repr Bool
+
   ite :: repr Bool -> repr a -> repr a -> repr a
 
 class SetExpr repr where
