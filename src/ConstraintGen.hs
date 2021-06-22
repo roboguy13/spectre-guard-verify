@@ -218,11 +218,11 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
       mapM_ (sameNode e) attrs
 
-      tell [setValue (C_Exit n) :=: unionSingle (setValue (C_Entry n)) (value (Var hash, SensAtom Secret))]
+      tell [value (C_Exit n) :=: unionSingle (value (C_Entry n)) (value (Var hash, SensAtom Secret))]
 
   | otherwise = do
       mapM_ (sameNode e) attrs
-      tell [setValue (C_Exit n) :=: unionSingle (setValue (C_Entry n)) (value (Var hash, (SensAtom Public)))]
+      tell [value (C_Exit n) :=: unionSingle (value (C_Entry n)) (value (Var hash, (SensAtom Public)))]
 
 handleDeclarator e = nop e
 
@@ -256,18 +256,18 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
 
   e0 `connect` e
 
-  tell [ setValue (E_Family (annotation e0)) :=: union (value (E_Family (annotation cv)))
+  tell [ value (E_Family (annotation e0)) :=: union (value (E_Family (annotation cv)))
                                                        (value (E_Family (annotation e))) ]
 
   handleExpr cv
-  tell [ setValue (C_Exit n) :=: ite (in_ (value (Var x, SensAtom Public)) (value (C_Entry n)))
+  tell [ value (C_Exit n) :=: ite (in_ (value (Var x, SensAtom Public)) (value (C_Entry n)))
                                     (unionSingle (value (C_Entry n)) (value (Var x, (SensT (annotation e)))))
                                     (value (C_Entry n))
        ]
     *> handleExpr e
 
 handleExpr e@(CVar (Ident _ x _) _) =
-  tell [ setValue (E_Family (annotation e)) :=: unionSingle empty (value (Var x)) ]
+  tell [ value (E_Family (annotation e)) :=: unionSingle empty (value (Var x)) ]
 
 handleExpr expr = do
   nop expr
@@ -276,7 +276,7 @@ handleExpr expr = do
   forM_ theChildren $ \c -> do
     -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
     sameNode c expr
-    tell [ setValue (E_Family (annotation c)) :=: value (E_Family (annotation expr)) ]
+    tell [ value (E_Family (annotation c)) :=: value (E_Family (annotation expr)) ]
     handleExpr c
   -- mapM_ handleExpr $ children expr
   -- go nodeIds
@@ -292,13 +292,13 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   handleExpr cond
 
   -- e0 `connect` cond
-  tell [ setValue (C_Entry (annotation cond)) :=: value (C_Entry l) ]
+  tell [ value (C_Entry (annotation cond)) :=: value (C_Entry l) ]
 
   tell go
 
   handleStmt t
 
-  tell [setValue (E_Family (annotation e0)) :=: value (E_Family (annotation cond))]
+  tell [value (E_Family (annotation e0)) :=: value (E_Family (annotation cond))]
 
   case f_maybe of
     Nothing -> pure ()
@@ -306,7 +306,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   where
     go =
       [entryConstraint t
-      ,setValue (C_Exit l) :=: union (value (C_Entry l))
+      ,value (C_Exit l) :=: union (value (C_Entry l))
                              (ite (value (SensT l) `equal` value (SensAtom Secret))
                                (maybeUnion (S_Family l m) (S_Family l))
                                (maybeUnion (C_Exit m) C_Exit))
@@ -315,7 +315,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
           Nothing -> []
           Just f -> [entryConstraint f]
 
-    entryConstraint x = setValue (C_Entry (annotation x)) :=: value (C_Entry l)
+    entryConstraint x = value (C_Entry (annotation x)) :=: value (C_Entry l)
 
     maybeUnion x g =
       case f_maybe of
@@ -352,7 +352,7 @@ handleStmt e = do --pure () --mapM_ handleStmt $ drop 1 $ universe e -- pure ()
 nop :: (GenCs repr, Annotated f) => f NodeId -> ConstraintGen repr ()
 nop e =
   tell
-    [ setValue (C_Exit (annotation e)) :=: value (C_Entry (annotation e)) ]
+    [ value (C_Exit (annotation e)) :=: value (C_Entry (annotation e)) ]
 
 connectList :: (GenCs repr, Annotated f) => [f NodeId] -> ConstraintGen repr ()
 connectList [] = pure ()
@@ -364,22 +364,22 @@ connectList (x:y:rest) = do
 connect :: (GenCs repr, Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen repr ()
 connect x y =
   tell
-    [ setValue (C_Entry (annotation y)) :=: value (C_Exit (annotation x)) ]
+    [ value (C_Entry (annotation y)) :=: value (C_Exit (annotation x)) ]
 
 -- | Combine two nodes, to behave as one
 sameNode :: (GenCs repr, Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen repr ()
 sameNode x y =
   tell
-    [ setValue (C_Entry (annotation x)) :=: value (C_Entry (annotation y))
-    , setValue (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y))
+    [ value (C_Entry (annotation x)) :=: value (C_Entry (annotation y))
+    , value (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y))
     ]
 
 -- TODO: Connect to following nodes
 handleFunDef :: (GenCs repr) => CFunctionDef NodeId -> ConstraintGen repr ()
 handleFunDef e@(CFunDef _ _ _ stmt _) = do
   tell
-    [ setValue (C_Exit (annotation e)) :=: empty
-    , setValue (C_Entry (annotation stmt)) :=: value (C_Exit (annotation e))
+    [ value (C_Exit (annotation e)) :=: empty
+    , value (C_Entry (annotation stmt)) :=: value (C_Exit (annotation e))
     ]
   void $ (constAction handleStmt) stmt
 

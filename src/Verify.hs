@@ -311,7 +311,7 @@ correctnessCondition nodeIds = do
   mapM_ trackingAssert asts
 
 evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
-evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
+evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   params <- mkParams
   paramsSetBool params <$> mkStringSymbol "core.minimize" <!> pure True
   solverSetParams params
@@ -328,7 +328,7 @@ evalZ3Converter vars nodeIds sPairs tNodes (Z3Converter conv) = evalZ3 $ do
     mapM_ (toZ3 . tDef) tNodes
     mapM_ (toZ3 . bDef) (map snd sPairs)
     liftIO $ putStrLn "!!! got here !!!"
-    Z3Converter conv
+    conv
     liftIO $ putStrLn "??? but not here ???"
     correctnessCondition nodeIds
 
@@ -468,36 +468,6 @@ instance FreeVars Var where
     return [x]
   mkZ3Var = Z3VarVar <$> mkSymVar' ("v", Var_Sort)
 
-forallQuantifyFreeVars :: forall f a. (FreeVars a) => f a -> (Z3Var a -> Z3Converter AST) -> Z3Converter AST
-forallQuantifyFreeVars e k = do
-  z3Var <- mkZ3Var @a
-  mkForallConst [] (getZ3VarApps z3Var) =<< k z3Var
-
-forallQuantifyZ3Var :: forall f a. (FreeVars a) => Z3Var a -> Z3Converter AST -> Z3Converter AST
-forallQuantifyZ3Var z3Var m = do
-  mkForallConst [] (getZ3VarApps z3Var) =<< m
-
-class Z3Equality a b where
-  z3Eq :: a -> b -> Z3Converter AST
-
-instance Z3Equality AST AST where
-  z3Eq = mkEq
-
-instance (Z3Equality a a, Z3Equality b b) => Z3Equality (a, b) (a, b) where
-  z3Eq (x, y) (x', y') =
-    z3M mkAnd [z3Eq x x', z3Eq y y']
-
-instance Z3Equality (Z3Var a) (Z3Var a) where
-  z3Eq (Z3VarSens (_, x)) (Z3VarSens (_, y)) = mkEq x y
-  z3Eq (Z3VarVar (_, x)) (Z3VarVar (_, y)) = mkEq x y
-  z3Eq (Z3VarPair (_, x) (_, y)) (Z3VarPair (_, x') (_, y')) = z3Eq (x, y) (x', y')
-
-instance (ToZ3 a, ToZ3 b) => Z3Equality (Z3Var (a, b)) (a, b) where
-  z3Eq (Z3VarPair x y) (x', y') = do
-    x'_z3 <- toZ3 x'
-    y'_z3 <- toZ3 y'
-    z3Eq (snd x, snd y) (x'_z3, y'_z3)
-
 getZ3VarASTs :: Z3Var a -> [AST]
 getZ3VarASTs (Z3VarSens x) = [snd x]
 getZ3VarASTs (Z3VarVar x) = [snd x]
@@ -531,7 +501,16 @@ instance ToZ3 (AnalysisSetFamily a) where
   toZ3 = (`applyFamilyFn` [])
 
 instance ToZ3 (ConstraintE Z3Repr) where
-  toZ3 (x :=: y) = mkEq <$> getZ3Repr x <!> getZ3Repr y
+  toZ3 (x :=: y) = do
+    liftIO $ putStrLn "--- constraint ---"
+    x' <- getZ3Repr x
+    y' <- getZ3Repr y
+    x_str <- astToString x'
+    y_str <- astToString y'
+    liftIO $ putStrLn $ "- " <> x_str
+    liftIO $ putStrLn $ "- " <> y_str
+    liftIO $ putStrLn "------------------"
+    mkEq x' y'
 
 newtype Z3Repr (a :: *) = Z3Repr { getZ3Repr :: Z3Converter AST }
   deriving (Functor)
@@ -631,6 +610,8 @@ instance SetExpr Z3Repr where
     let fX' = f (Z3Repr (pure x))
     fX <- getZ3Repr fX'
 
+    -- liftIO $ putStrLn $ "fX' sort = " ++ show (getSetSort fX')
+
     -- set_sort <- lookupZ3Sort VarSens_Sort --mkSetSort =<< getSort fX
     set_sort <- lookupZ3Sort $ getSetSort fX'
 
@@ -639,12 +620,30 @@ instance SetExpr Z3Repr where
 
     compr_sym <- mkStringSymbol ("compr" <> show uniq)
 
+
     compr <- mkConst compr_sym set_sort
 
-    assert =<< (mkForallConst [] [x_sym]
+    liftIO $ putStrLn "before assert *****"
+
+    -- liftIO $ putStrLn $ "--- Using set_sort = " <> show (getSetSort fX')
+    -- s_str <- astToString s
+    -- fX_str <- astToString fX
+    -- pX_str <- astToString pX
+    -- liftIO $ putStrLn $ "setCompr: fX = " <> fX_str
+    -- liftIO $ putStrLn $ "setCompr: pX = " <> pX_str
+    -- liftIO $ putStrLn $ "setCompr: s = " <> s_str
+
+    ast <- (mkForallConst [] [x_sym]
       =<<
         (mkIff <$> (z3M mkAnd [mkSetMember x s, pure pX])
                <!> (mkSetMember fX compr)))
+
+    ast_str <- astToString ast
+    liftIO $ putStrLn $ "setCompr: " <> ast_str
+
+    assert ast
+    liftIO $ putStrLn "after assert +++++"
+
 
     return compr
 
@@ -658,7 +657,16 @@ instance LatticeExpr Z3Repr where
     mkApp setJoin [set]
 
 constraintsToZ3 :: Constraints Z3Repr -> Z3Converter ()
-constraintsToZ3 cs = mapM_ toZ3 cs
+constraintsToZ3 cs = do
+  forM cs
+    (\c -> do
+        liftIO $ putStrLn "constraints to z3"
+        -- _
+        c' <- toZ3 c
+        liftIO $ print c')
+  -- asts <- mapM toZ3 cs
+  -- liftIO $ print asts
+  return ()
 
 
 nodeIdToLoc :: CTranslationUnit (NodeInfo, NodeId) -> NodeId -> (NodeId, Maybe Position)
@@ -714,6 +722,9 @@ newNodeId = do
   put (NodeId (succ x))
 
   return $ NodeId x
+
+-- showConstraint :: ConstraintE Z3Repr -> String
+-- showConstraint (x :=: y) = undefined
 
 main :: IO ()
 main = do
