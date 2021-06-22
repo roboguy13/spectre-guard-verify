@@ -28,12 +28,16 @@ import qualified Data.Set as Set
 import           Data.Maybe
 
 import           SetExpr
+import           Ppr
 
 newtype Var = Var { getVar :: Int }
   deriving (Show, Eq, Ord, Data)
 
 newtype NodeId = NodeId { getNodeId :: Integer }
   deriving (Show, Eq, Ord, Data)
+
+instance Ppr NodeId where
+  ppr (NodeId n) = 'n' : show n
 
 data Sensitivity = Public | Secret
   deriving (Show, Eq)
@@ -195,7 +199,7 @@ execIdTracker (ConstraintGen g) = mconcat $ map go $ execWriter g
     go :: ConstraintE IdTracker -> UsedIds
     go (IdTracker x :=: IdTracker y) = execWriter x <> execWriter y
 
-execConstraintGen :: GenCs repr => (forall r. GenCs r => ConstraintGen r a) -> ConstraintGenResults repr
+execConstraintGen :: GenCs repr => (forall r. GenCs r => ConstraintGen r ()) -> ConstraintGenResults repr
 execConstraintGen cg@(ConstraintGen g) =
   ConstraintGenResults
     { cgConstraints = execWriter g
