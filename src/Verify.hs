@@ -42,6 +42,8 @@ import           Control.Monad.State
 import           Control.Monad.Reader
 import           Control.Monad.Writer
 
+import           Control.Exception hiding (assert)
+
 import           Data.Generics.Uniplate.Data
 import           Data.Bifunctor
 
@@ -314,6 +316,7 @@ evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Conv
 evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   params <- mkParams
   paramsSetBool params <$> mkStringSymbol "core.minimize" <!> pure True
+  -- paramsSetSymbol params <$> mkStringSymbol "trace" <!> mkStringSymbol "true"
   solverSetParams params
 
   z3Info <- defineZ3Names vars nodeIds
@@ -504,11 +507,14 @@ instance ToZ3 (ConstraintE Z3Repr) where
   toZ3 (x :=: y) = do
     liftIO $ putStrLn "--- constraint ---"
     x' <- getZ3Repr x
-    y' <- getZ3Repr y
+
     x_str <- astToString x'
-    y_str <- astToString y'
     liftIO $ putStrLn $ "- " <> x_str
+
+    y' <- getZ3Repr y
+    y_str <- astToString y'
     liftIO $ putStrLn $ "- " <> y_str
+
     liftIO $ putStrLn "------------------"
     mkEq x' y'
 
@@ -592,7 +598,7 @@ instance SetExpr Z3Repr where
   setValue = Z3Repr . toZ3Set
 
   union = z3ReprLift2List mkSetUnion
-  unionSingle = z3ReprLift2 (flip mkSetAdd)
+  unionSingle = z3ReprLift2 mkSetAdd
 
   empty :: forall (set :: * -> *) a. (GetSort a, SetCt Z3Repr set) => Z3Repr (set a)
   empty = Z3Repr $ do
@@ -778,6 +784,7 @@ main = do
 
           -- putStrLn $ genDOT' constraints
           hPrint stderr r
+          hPrint stderr modelStr_maybe
 
           -- case modelStr_maybe of
           --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core

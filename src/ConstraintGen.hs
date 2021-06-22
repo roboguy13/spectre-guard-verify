@@ -98,6 +98,7 @@ instance Monoid (ConstraintGenResults repr) where
       }
 
 newtype IdTracker a = IdTracker { runIdTracker :: Writer UsedIds () }
+-- newtype PprExpr a = PprExpr
 
 instance Semigroup (IdTracker a) where
   IdTracker x <> IdTracker y = IdTracker (x >> y)
@@ -222,7 +223,7 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
 
   | otherwise = do
       mapM_ (sameNode e) attrs
-      tell [value (C_Exit n) :=: unionSingle (value (C_Entry n)) (value (Var hash, (SensAtom Public)))]
+      tell [value (C_Exit n) :=: unionSingle (value (C_Entry n)) (value (Var hash, SensAtom Public))]
 
 handleDeclarator e = nop e
 
