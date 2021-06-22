@@ -86,7 +86,7 @@ mkSymVar name z3sort = do
   return (sort, app, var)
 
 generateUnsatCores :: Bool
-generateUnsatCores = True
+generateUnsatCores = False --True
 
 trackingAssert :: MonadZ3 z3 => AST -> z3 ()
 trackingAssert =
@@ -312,7 +312,7 @@ correctnessCondition nodeIds = do
   asts <- mapM consistentSensitivity nodeIds
   mapM_ trackingAssert asts
 
-evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter a -> IO (Result, Either [String] String)
+evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   params <- mkParams
   paramsSetBool params <$> mkStringSymbol "core.minimize" <!> pure True
@@ -327,9 +327,9 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   --     -- liftIO $ hPutStrLn stderr str
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
-    mapM_ (toZ3 . uncurry sDef) sPairs
-    mapM_ (toZ3 . tDef) tNodes
-    mapM_ (toZ3 . bDef) (map snd sPairs)
+    mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
+    mapM_ (assert <=< toZ3 . tDef) tNodes
+    mapM_ (assert <=< toZ3 . bDef) (map snd sPairs)
     liftIO $ putStrLn "!!! got here !!!"
     conv
     liftIO $ putStrLn "??? but not here ???"
@@ -339,14 +339,15 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   liftIO $ hPutStrLn stderr str
   liftIO $ hFlush stderr
 
-  check
-  (r, model) <- getModel
-  modelOrCore <- case model of
-    Nothing -> do
-      core <- getUnsatCore
-      Left <$> mapM astToString core
-    Just m -> Right <$> showModel m
-  pure (r, modelOrCore)
+  r <- check
+  pure (r, Left [])
+  -- (r, model) <- getModel
+  -- modelOrCore <- case model of
+  --   Nothing -> do
+  --     core <- getUnsatCore
+  --     Left <$> mapM astToString core
+  --   Just m -> Right <$> showModel m
+  -- pure (r, modelOrCore)
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -505,17 +506,17 @@ instance ToZ3 (AnalysisSetFamily a) where
 
 instance ToZ3 (ConstraintE Z3Repr) where
   toZ3 (x :=: y) = do
-    liftIO $ putStrLn "--- constraint ---"
+    -- liftIO $ putStrLn "--- constraint ---"
     x' <- getZ3Repr x
 
     x_str <- astToString x'
-    liftIO $ putStrLn $ "- " <> x_str
+    -- liftIO $ putStrLn $ "- " <> x_str
 
     y' <- getZ3Repr y
     y_str <- astToString y'
-    liftIO $ putStrLn $ "- " <> y_str
+    -- liftIO $ putStrLn $ "- " <> y_str
 
-    liftIO $ putStrLn "------------------"
+    -- liftIO $ putStrLn "------------------"
     mkEq x' y'
 
 newtype Z3Repr (a :: *) = Z3Repr { getZ3Repr :: Z3Converter AST }
@@ -665,14 +666,7 @@ instance LatticeExpr Z3Repr where
 constraintsToZ3 :: Constraints Z3Repr -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs
-    (\c -> do
-        liftIO $ putStrLn "constraints to z3"
-        -- _
-        c' <- toZ3 c
-        c_str <- astToString c'
-        liftIO $ putStrLn $ "constraint ast: " ++ c_str)
-  -- asts <- mapM toZ3 cs
-  -- liftIO $ print asts
+    (\c -> assert =<< toZ3 c)
   return ()
 
 
@@ -784,7 +778,7 @@ main = do
 
           -- putStrLn $ genDOT' constraints
           hPrint stderr r
-          hPrint stderr modelStr_maybe
+          -- hPrint stderr modelStr_maybe
 
           -- case modelStr_maybe of
           --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
