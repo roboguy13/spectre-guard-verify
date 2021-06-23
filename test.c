@@ -8,9 +8,9 @@ int test() {
   x = z;
   // w = y;
 
-  if (y == 0) {
-     w = 3;
-  }
+  //if (y == 0) {
+  //   w = 3;
+  //}
   return 1;
 }
 

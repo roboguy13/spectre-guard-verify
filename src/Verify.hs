@@ -330,9 +330,7 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
     mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
     mapM_ (assert <=< toZ3 . tDef) tNodes
     mapM_ (assert <=< toZ3 . bDef) (map snd sPairs)
-    liftIO $ putStrLn "!!! got here !!!"
     conv
-    liftIO $ putStrLn "??? but not here ???"
     correctnessCondition nodeIds
 
   str <- solverToString

@@ -155,7 +155,7 @@ instance IdTrackerValue SensExpr where
   idTrackerValue (SensT n) = tellTNodes [n]
 
 instance IdTrackerValue (Var, SensExpr) where
-  idTrackerValue (v, _) = tellVars [v]
+  idTrackerValue (v, x) = tellVars [v] <> retag (idTrackerValue x)
 
 instance IdTrackerValue Var where
   idTrackerValue v = tellVars [v]
