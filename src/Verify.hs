@@ -86,7 +86,7 @@ mkSymVar name z3sort = do
   return (sort, app, var)
 
 generateUnsatCores :: Bool
-generateUnsatCores = False --True
+generateUnsatCores = True
 
 trackingAssert :: MonadZ3 z3 => AST -> z3 ()
 trackingAssert =
@@ -310,7 +310,8 @@ consistentSensitivity n = do
 correctnessCondition :: [NodeId] -> Z3Converter ()
 correctnessCondition nodeIds = do
   asts <- mapM consistentSensitivity nodeIds
-  mapM_ trackingAssert asts
+  -- mapM_ trackingAssert asts
+  mapM_ assert asts
 
 evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
 evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
@@ -328,7 +329,7 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
     mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
-    mapM_ (assert <=< toZ3 . tDef) tNodes
+    mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
     mapM_ (assert <=< toZ3 . bDef) (map snd sPairs)
     conv
     correctnessCondition nodeIds
@@ -337,15 +338,16 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   liftIO $ hPutStrLn stderr str
   liftIO $ hFlush stderr
 
-  r <- check
-  pure (r, Left [])
-  -- (r, model) <- getModel
-  -- modelOrCore <- case model of
-  --   Nothing -> do
-  --     core <- getUnsatCore
-  --     Left <$> mapM astToString core
-  --   Just m -> Right <$> showModel m
-  -- pure (r, modelOrCore)
+  _ <- check
+  -- pure (r, Left [])
+
+  (r, model) <- getModel
+  modelOrCore <- case model of
+    Nothing -> do
+      core <- getUnsatCore
+      Left <$> mapM astToString core
+    Just m -> Right <$> showModel m
+  pure (r, modelOrCore)
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -646,7 +648,7 @@ instance SetExpr Z3Repr where
     ast_str <- astToString ast
     liftIO $ putStrLn $ "setCompr: " <> ast_str
 
-    assert ast
+    trackingAssert ast
     liftIO $ putStrLn "after assert +++++"
 
 
@@ -661,10 +663,10 @@ instance LatticeExpr Z3Repr where
 
     mkApp setJoin [set]
 
-constraintsToZ3 :: Constraints Z3Repr -> Z3Converter ()
+constraintsToZ3 :: Constraints -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs
-    (\c -> assert =<< toZ3 c)
+    (\(SomeConstraint (c :: ConstraintE Z3Repr)) -> trackingAssert =<< toZ3 c)
   return ()
 
 
@@ -747,7 +749,7 @@ main = do
         Right parsed -> do
           let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
               parsed'' = first (fmap snd) parsed'
-              results = execConstraintGen (void (transformM (constAction handleTransUnit) parsed'')) :: ConstraintGenResults Z3Repr
+              results = execConstraintGen (void (transformM (constAction handleTransUnit) parsed'')) :: ConstraintGenResults
 
               constraints = cgConstraints results
               used = cgUsed results
@@ -778,8 +780,8 @@ main = do
           hPrint stderr r
           -- hPrint stderr modelStr_maybe
 
-          -- case modelStr_maybe of
-          --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
-          --   Right modelStr -> do
-          --     putStrLn $ "Model:\n" <> modelStr
+          case modelStr_maybe of
+            Left core -> putStrLn $ "Unsat core:\n" <> unlines core
+            Right modelStr -> do
+              putStrLn $ "Model:\n" <> modelStr
 

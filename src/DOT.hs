@@ -8,6 +8,7 @@
 module DOT (genDOT, genDOT', DOTConfig(..), defaultDOTConfig) where
 
 import           SetExpr
+import           ConstraintGen
 
 import           Data.Foldable
 import           Data.Set (Set)
@@ -49,10 +50,10 @@ runDOTM m = runIdentity $ runSTT $ do
 fastNub :: Ord a => [a] -> [a]
 fastNub = Set.toList . Set.fromList
 
-genDOT' :: SetConstraints -> String
+genDOT' :: (forall repr. Constraints repr) -> String
 genDOT' = genDOT defaultDOTConfig
 
-genDOT :: DOTConfig -> SetConstraints -> String
+genDOT :: DOTConfig -> (forall repr. Constraints repr) -> String
 genDOT config constraints =
   runDOTM $ do
     mapM_ combineEntries constraints
@@ -63,7 +64,7 @@ genDOT config constraints =
 
     boundaries <- mapM (genBoundaries entries exits) constraints
 
-    connections <- mapM (uncurry genDOTFor) (zip [1..] constraints)
+    connections <- mapM (\(x, y) -> genDOTFor x y) (zip [1..] constraints)
 
     return $ unlines
       [ "strict digraph {"
@@ -104,7 +105,7 @@ genConfig DOTConfig {..} =
   , "edge [color=" <> edgeColor <> "]"
   ]
 
-genDOTFor :: Int -> SetConstraint -> DOTM s [String]
+genDOTFor :: Int -> (forall repr. ConstraintE repr) -> DOTM s [String]
 genDOTFor graphN sc = do
   r <- genDOTFor' sc
 
@@ -133,44 +134,44 @@ dotConnectWithColor color x y
   | x /= y = x <> " -> " <> y <> " [color=" <> color <> "];"
   | x == y = ""
 
-class BoundaryNodes a where
-  getEntryNodes :: a -> Set NodeId
-  getExitNodes :: a -> Set NodeId
+-- class BoundaryNodes a where
+--   getEntryNodes :: a -> Set NodeId
+--   getExitNodes :: a -> Set NodeId
 
-instance BoundaryNodes SetConstraint where
-  getEntryNodes (x :=: y) = getEntryNodes x <> getEntryNodes y
-  getExitNodes  (x :=: y) = getExitNodes x <> getExitNodes y
+-- instance BoundaryNodes SetConstraint where
+--   getEntryNodes (x :=: y) = getEntryNodes x <> getEntryNodes y
+--   getExitNodes  (x :=: y) = getExitNodes x <> getExitNodes y
 
-instance BoundaryNodes SetConstraints where
-  getEntryNodes = foldr (<>) mempty . map getEntryNodes
-  getExitNodes =  foldr (<>) mempty . map getExitNodes
+-- instance BoundaryNodes SetConstraints where
+--   getEntryNodes = foldr (<>) mempty . map getEntryNodes
+--   getExitNodes =  foldr (<>) mempty . map getExitNodes
 
-instance BoundaryNodes (SetExpr freeVars) where
-  getEntryNodes (SE_Atom a) = getEntryNodes a
-  getEntryNodes (SE_Union x y) = getEntryNodes x <> getEntryNodes y
-  getEntryNodes (SE_UnionSingle x _ _) = getEntryNodes x
-  getEntryNodes (SE_IfThenElse _ x y) = getEntryNodes x <> getEntryNodes y
-  getEntryNodes SE_Empty = mempty
+-- instance BoundaryNodes (SetExpr freeVars) where
+--   getEntryNodes (SE_Atom a) = getEntryNodes a
+--   getEntryNodes (SE_Union x y) = getEntryNodes x <> getEntryNodes y
+--   getEntryNodes (SE_UnionSingle x _ _) = getEntryNodes x
+--   getEntryNodes (SE_IfThenElse _ x y) = getEntryNodes x <> getEntryNodes y
+--   getEntryNodes SE_Empty = mempty
 
-  getExitNodes (SE_Atom a) = getExitNodes a
-  getExitNodes (SE_Union x y) = getExitNodes x <> getExitNodes y
-  getExitNodes (SE_UnionSingle x _ _) = getExitNodes x
-  getExitNodes (SE_IfThenElse _ x y) = getExitNodes x <> getExitNodes y
-  getExitNodes SE_Empty = mempty
+--   getExitNodes (SE_Atom a) = getExitNodes a
+--   getExitNodes (SE_Union x y) = getExitNodes x <> getExitNodes y
+--   getExitNodes (SE_UnionSingle x _ _) = getExitNodes x
+--   getExitNodes (SE_IfThenElse _ x y) = getExitNodes x <> getExitNodes y
+--   getExitNodes SE_Empty = mempty
 
-instance BoundaryNodes (AtomicSet freeVars) where
-  getEntryNodes (SingleVar {}) = mempty
-  getEntryNodes (SetFamily sf) = getEntryNodes sf
+-- instance BoundaryNodes (AtomicSet freeVars) where
+--   getEntryNodes (SingleVar {}) = mempty
+--   getEntryNodes (SetFamily sf) = getEntryNodes sf
 
-  getExitNodes (SingleVar {}) = mempty
-  getExitNodes (SetFamily sf) = getExitNodes sf
+--   getExitNodes (SingleVar {}) = mempty
+--   getExitNodes (SetFamily sf) = getExitNodes sf
 
-instance BoundaryNodes (SetFamily freeVars) where
-  getEntryNodes (C_Entry' n) = Set.singleton n
-  getEntryNodes _ = mempty
+-- instance BoundaryNodes (SetFamily freeVars) where
+--   getEntryNodes (C_Entry' n) = Set.singleton n
+--   getEntryNodes _ = mempty
 
-  getExitNodes (C_Exit' n) = Set.singleton n
-  getExitNodes _ = mempty
+--   getExitNodes (C_Exit' n) = Set.singleton n
+--   getExitNodes _ = mempty
 
 entry :: NodeId -> String
 entry (NodeId n) = "entry" <> show n
@@ -184,7 +185,7 @@ node (NodeId n) = "n" <> show n
 nodeClassName :: (NodeId -> String) -> [NodeId] -> String
 nodeClassName f = intercalate "_" . map f
 
-genBoundaries :: [NodeId] -> [NodeId] -> SetConstraint -> DOTM s [String]
+genBoundaries :: [NodeId] -> [NodeId] -> (forall repr. ConstraintE repr) -> DOTM s [String]
 genBoundaries actualEntries actualExits (x :=: y) = do
   let allNodeIds = toList $ getNodeIds x <> getNodeIds y
       -- actualEntries = toList $ getEntryNodes x <> getEntryNodes y
@@ -236,6 +237,17 @@ genBoundaries actualEntries actualExits (x :=: y) = do
   --         <> Set.singleton (entry n <> " [shape=box];")
   --         <> Set.singleton (exit n <> " [shape=box];")
 
+newtype CombineBoundaries s a = CombineBoundaries (DOTM s ())
+
+combineEntries = undefined
+combineExits = undefined
+
+getEntryNodes = undefined
+getExitNodes = undefined
+
+genDOTFor' = undefined
+
+{-
 combineEntries :: SetConstraint -> DOTM s ()
 combineEntries (C_Entry' n :=: SE_Atom (C_Entry m)) = do
   entryEq <- entryEquiv
@@ -255,35 +267,36 @@ combineExits (C_Exit' n :=: SE_Atom (C_Exit m)) =  do
   liftSTT $ combine exitEq nClass mClass
   return ()
 combineExits _ = return ()
+-}
 
-genConnections :: (String -> String -> String) -> String -> SetExpr freeVars -> DOTM s [String]
-genConnections connect endpointA e = do
-  let entries0 = toList $ getEntryNodes e
-      exits0 = toList $ getExitNodes e
+-- genConnections :: (String -> String -> String) -> String -> SetExpr freeVars -> DOTM s [String]
+-- genConnections connect endpointA e = do
+--   let entries0 = toList $ getEntryNodes e
+--       exits0 = toList $ getExitNodes e
 
-  entryEq <- entryEquiv
-  exitEq <- exitEquiv
+--   entryEq <- entryEquiv
+--   exitEq <- exitEquiv
 
-  let classDescEntry = classDesc entryEq
-      classDescExit  = classDesc exitEq
+--   let classDescEntry = classDesc entryEq
+--       classDescExit  = classDesc exitEq
 
-  entries <- liftSTT $ map (nodeClassName entry) <$> mapM classDescEntry entries0
-  exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM classDescExit exits0
+--   entries <- liftSTT $ map (nodeClassName entry) <$> mapM classDescEntry entries0
+--   exits   <- liftSTT $ map (nodeClassName exit)  <$> mapM classDescExit exits0
 
-  return $ map (connect endpointA) entries
-           ++ map (connect endpointA) exits
+--   return $ map (connect endpointA) entries
+--            ++ map (connect endpointA) exits
 
-genDOTFor' :: SetConstraint -> DOTM s [String]
-genDOTFor' (C_Entry' n :=: y) = do
-  entryEq <- entryEquiv
-  nDesc <- liftSTT $ classDesc entryEq n
-  genConnections (flip (dotConnectWithColor "red")) (nodeClassName entry nDesc) y
+-- genDOTFor' :: SetConstraint -> DOTM s [String]
+-- genDOTFor' (C_Entry' n :=: y) = do
+--   entryEq <- entryEquiv
+--   nDesc <- liftSTT $ classDesc entryEq n
+--   genConnections (flip (dotConnectWithColor "red")) (nodeClassName entry nDesc) y
 
-genDOTFor' (C_Exit'  n :=: y) = do
-  exitEq <- exitEquiv
-  nDesc <- liftSTT $ classDesc exitEq n
+-- genDOTFor' (C_Exit'  n :=: y) = do
+--   exitEq <- exitEquiv
+--   nDesc <- liftSTT $ classDesc exitEq n
 
-  genConnections (flip (dotConnectWithColor "red")) (nodeClassName exit nDesc) y
-genDOTFor' (Atom_E' {} :=: _) = return []
-genDOTFor' (Atom_S' {} :=: _) = return []
+--   genConnections (flip (dotConnectWithColor "red")) (nodeClassName exit nDesc) y
+-- genDOTFor' (Atom_E' {} :=: _) = return []
+-- genDOTFor' (Atom_S' {} :=: _) = return []
 
