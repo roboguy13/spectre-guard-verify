@@ -58,8 +58,6 @@ class SetExpr repr where
   type SetCt repr :: (* -> *) -> Constraint
   type SetElemCt repr :: * -> Constraint
 
-  setValue :: (SetCt repr set, SetElemCt repr a) => set a -> repr (set a)
-
   union :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr (set a) -> repr (set a)
   unionSingle :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr a -> repr (set a)
   empty :: (SetCt repr set, SetElemCt repr a) => repr (set a)

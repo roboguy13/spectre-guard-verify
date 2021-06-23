@@ -187,7 +187,6 @@ instance SetExpr IdTracker where
   type SetCt IdTracker = IdTrackerSet
   type SetElemCt IdTracker = Unconstrained
 
-  setValue = error "IdTracker: setValue" --idTrackerSetValue
   x `union` y = x <> y
   x `unionSingle` y = x <> retag y
   empty = idTrackerAny

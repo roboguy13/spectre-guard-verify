@@ -596,8 +596,6 @@ instance SetExpr Z3Repr where
   type SetCt Z3Repr = Z3Set
   type SetElemCt Z3Repr = GetSort
 
-  setValue = Z3Repr . toZ3Set
-
   union = z3ReprLift2List mkSetUnion
   unionSingle = z3ReprLift2 mkSetAdd
 
