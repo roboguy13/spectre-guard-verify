@@ -5,6 +5,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
@@ -186,7 +187,7 @@ instance SetExpr IdTracker where
   type SetCt IdTracker = IdTrackerSet
   type SetElemCt IdTracker = Unconstrained
 
-  setValue = idTrackerSetValue
+  setValue = error "IdTracker: setValue" --idTrackerSetValue
   x `union` y = x <> y
   x `unionSingle` y = x <> retag y
   empty = idTrackerAny
@@ -196,11 +197,14 @@ instance LatticeExpr IdTracker where
   type LatticeCt IdTracker = Unconstrained
   lub xs = retag xs
 
-execIdTracker :: ConstraintGen a -> UsedIds
-execIdTracker (ConstraintGen g) = mconcat $ map (\(SomeConstraint x) -> go x) $ execWriter g
+idTrackerOnConstraints :: Constraints -> UsedIds
+idTrackerOnConstraints = mconcat . map (\(SomeConstraint x) -> go x)
   where
     go :: ConstraintE IdTracker -> UsedIds
     go (IdTracker x :=: IdTracker y) = execWriter x <> execWriter y
+
+execIdTracker :: ConstraintGen a -> UsedIds
+execIdTracker (ConstraintGen g) = idTrackerOnConstraints $ execWriter g
 
 execConstraintGen :: ConstraintGen () -> ConstraintGenResults
 execConstraintGen cg@(ConstraintGen g) =

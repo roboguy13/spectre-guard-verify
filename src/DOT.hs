@@ -4,6 +4,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module DOT (genDOT, genDOT', DOTConfig(..), defaultDOTConfig) where
 
@@ -20,6 +22,7 @@ import           Data.List
 import           Data.Equivalence.STT --(Equiv, leastEquiv)
 import           Data.Functor.Identity
 import           Control.Monad.Reader
+import           Control.Monad.Writer
 import           Control.Monad.ST.Trans
 
 type DOTEquiv s = Equiv s [NodeId] NodeId
@@ -50,17 +53,18 @@ runDOTM m = runIdentity $ runSTT $ do
 fastNub :: Ord a => [a] -> [a]
 fastNub = Set.toList . Set.fromList
 
-genDOT' :: (forall repr. Constraints repr) -> String
+genDOT' :: Constraints -> String
 genDOT' = genDOT defaultDOTConfig
 
-genDOT :: DOTConfig -> (forall repr. Constraints repr) -> String
+genDOT :: DOTConfig -> Constraints -> String
 genDOT config constraints =
   runDOTM $ do
     mapM_ combineEntries constraints
     mapM_ combineExits constraints
 
-    let entries = toList $ getEntryNodes constraints
-        exits   = toList $ getExitNodes constraints
+    let entryExit = getEntryExit constraints
+        entries = toList $ entryNodes entryExit
+        exits   = toList $ exitNodes  entryExit
 
     boundaries <- mapM (genBoundaries entries exits) constraints
 
@@ -105,8 +109,8 @@ genConfig DOTConfig {..} =
   , "edge [color=" <> edgeColor <> "]"
   ]
 
-genDOTFor :: Int -> (forall repr. ConstraintE repr) -> DOTM s [String]
-genDOTFor graphN sc = do
+genDOTFor :: Int -> SomeConstraint -> DOTM s [String]
+genDOTFor graphN (SomeConstraint sc) = do
   r <- genDOTFor' sc
 
   return
@@ -185,8 +189,11 @@ node (NodeId n) = "n" <> show n
 nodeClassName :: (NodeId -> String) -> [NodeId] -> String
 nodeClassName f = intercalate "_" . map f
 
-genBoundaries :: [NodeId] -> [NodeId] -> (forall repr. ConstraintE repr) -> DOTM s [String]
-genBoundaries actualEntries actualExits (x :=: y) = do
+getNodeIds :: IdTracker a -> [NodeId]
+getNodeIds = Set.toList . nodeIdsUsed . execWriter . runIdTracker
+
+genBoundaries :: [NodeId] -> [NodeId] -> SomeConstraint -> DOTM s [String]
+genBoundaries actualEntries actualExits (SomeConstraint (x :=: y)) = do
   let allNodeIds = toList $ getNodeIds x <> getNodeIds y
       -- actualEntries = toList $ getEntryNodes x <> getEntryNodes y
       -- actualExits = toList $ getExitNodes x <> getExitNodes y
@@ -237,14 +244,109 @@ genBoundaries actualEntries actualExits (x :=: y) = do
   --         <> Set.singleton (entry n <> " [shape=box];")
   --         <> Set.singleton (exit n <> " [shape=box];")
 
-newtype CombineBoundaries s a = CombineBoundaries (DOTM s ())
 
+-- newtype CombineBoundaries s a = CombineBoundaries (DOTM s ())
+
+
+combineEntries :: SomeConstraint -> DOTM s ()
 combineEntries = undefined
 combineExits = undefined
 
-getEntryNodes = undefined
-getExitNodes = undefined
+data EntryExit =
+  EntryExit
+    { entryNodes :: Set NodeId
+    , exitNodes  :: Set NodeId
+    }
 
+instance Semigroup EntryExit where
+  x <> y =
+    EntryExit
+      { entryNodes = entryNodes x <> entryNodes y
+      , exitNodes  = exitNodes  x <> exitNodes  y
+      }
+
+instance Monoid EntryExit where
+  mempty = EntryExit mempty mempty
+
+newtype EntryExitTracker a = EntryExitTracker { getEntryExitTracker :: Writer EntryExit () }
+
+instance Semigroup (EntryExitTracker a) where
+  EntryExitTracker x <> EntryExitTracker y = EntryExitTracker (x >> y)
+
+entryExitRetag :: EntryExitTracker a -> EntryExitTracker b
+entryExitRetag (EntryExitTracker x) = EntryExitTracker x
+
+instance BoolExpr EntryExitTracker where
+  type EqualCt EntryExitTracker = Unconstrained
+
+  in_ x xs = entryExitRetag (x <> entryExitRetag xs)
+  x ^&&^ y = x <> y
+  x `equal` y = entryExitRetag (x <> y)
+  true = EntryExitTracker $ return ()
+  false = EntryExitTracker $ return ()
+
+  ite c t f = entryExitRetag (entryExitRetag c <> t <> f)
+
+instance SetExpr EntryExitTracker where
+  type SetCt EntryExitTracker = Unconstrained
+  type SetElemCt EntryExitTracker = Unconstrained
+
+  setValue = error "EntryExitTracker: setValue"
+  x `union` y = x <> y
+  x `unionSingle` y = x <> entryExitRetag y
+  empty = EntryExitTracker $ return ()
+  setCompr f p s =
+    (entryExitRetag (f (EntryExitTracker (return ())))
+      <>
+     entryExitRetag (p (EntryExitTracker (return ())))
+      <>
+     entryExitRetag s)
+
+class EntryExitValue a where
+  entryExitValue :: a -> EntryExitTracker a
+
+instance EntryExitValue (AnalysisSetFamily a) where
+  entryExitValue (C_Entry n) = entryExitRetag $ EntryExitTracker $ tell mempty { entryNodes = [n] }
+  entryExitValue (C_Exit n) = entryExitRetag $ EntryExitTracker $ tell mempty { exitNodes = [n] }
+  entryExitValue _ = EntryExitTracker $ return ()
+
+instance EntryExitValue (Var, SensExpr) where
+  entryExitValue _ = EntryExitTracker $ return ()
+
+instance EntryExitValue Var where
+  entryExitValue _ = EntryExitTracker $ return ()
+
+instance EntryExitValue SensExpr where
+  entryExitValue _ = EntryExitTracker $ return ()
+
+instance Value EntryExitTracker where
+  type ValueCt EntryExitTracker = EntryExitValue
+  value = entryExitValue
+
+instance LatticeExpr EntryExitTracker where
+  type LatticeCt EntryExitTracker = Unconstrained
+  lub x = entryExitRetag x
+
+-- runEntryExitTracker :: Constraints -> EntryExit
+-- runEntryExitTracker =
+
+getEntryExit :: Constraints -> EntryExit
+getEntryExit = mconcat . map (\(SomeConstraint c) -> go c)
+  where
+    go :: ConstraintE EntryExitTracker -> EntryExit
+    go (EntryExitTracker x :=: EntryExitTracker y) = execWriter x <> execWriter y
+
+-- getExitNodes :: Constraints -> Set NodeId
+-- getExitNodes = undefined
+
+newtype GenDOT s a = GenDOT (DOTM s ())
+
+-- instance BoolExpr (GenDOT s) wwhere
+--   type EqualCt (GenDOT s) = Unconstrained
+
+
+
+genDOTFor' :: GenCs repr => ConstraintE repr -> DOTM s [String]
 genDOTFor' = undefined
 
 {-
