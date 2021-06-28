@@ -542,7 +542,7 @@ instance ToZ3 (Expr Z3Var Var SensExpr AnalysisSetFamily a) where
 
     compr <- mkConst compr_sym set_sort
 
-    mkForallConst [] [x_sym]
+    assert =<< mkForallConst [] [x_sym]
       =<< 
         (mkIff <$> (z3M mkAnd [mkSetMember x xs', pure pX'])
                <!> (mkSetMember fX' compr))
