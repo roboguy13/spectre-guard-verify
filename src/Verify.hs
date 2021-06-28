@@ -68,11 +68,6 @@ import           ConstraintGen
 
 -- data Z3Var a = Z3Var { getZ3Var :: AST }
 
-data Z3Var a where
-  Z3VarSens :: (App, AST) -> Z3Var SensExpr
-  Z3VarVar :: (App, AST) -> Z3Var Var
-  Z3VarPair :: (App, AST) -> (App, AST) -> Z3Var (a, b)
-
 infixl 4 <!>
 (<!>) :: Monad m => m (a -> m b) -> m a -> m b
 f <!> x = join (f <*> x)
@@ -249,49 +244,50 @@ defineZ3Names vars nodeIds = do
        , z3Info_sens_setJoin = sens_setJoin
        }
 
-tDef :: NodeId -> ConstraintE Z3Repr
+tDef :: NodeId -> AnalysisConstraint Z3Var
 tDef n =
-  toZ3Repr (SensT n) :=: rhs
+  MonoidVal (SensT n) :=: rhs
   where
-    rhs :: Z3Repr SensExpr
+    rhs :: AnalysisExpr Z3Var SensExpr
     rhs =
-      lub (setCompr
-              varSens_sensProj
+      Lub (SetCompr
+              Snd
+              -- varSens_sensProj
 
-              (\vs -> varSens_varProj vs
-                       `in_`
+              (\vs -> Fst vs
+                       `In`
                       value (E_Family n))
 
-              (toZ3Repr (C_Entry n)))
+              (SetFamily (C_Entry n)))
 
-bDef :: NodeId -> ConstraintE Z3Repr
+bDef :: NodeId -> AnalysisConstraint Z3Var
 bDef n =
-  toZ3Repr (B_Family n) :=: rhs
+  SetFamily (B_Family n) :=: rhs
   where
-    rhs :: Z3Repr (AnalysisSetFamily Var)
+    rhs :: AnalysisExpr Z3Var (SetE Var)
     rhs =
-      setCompr
-        (\vs -> varSens_varProj vs)
-        (\_ -> true)
-        (toZ3Repr (C_Exit n))
+      SetCompr
+        (\vs -> Fst vs)
+        (\_ -> BoolVal True)
+        (SetFamily (C_Exit n))
 
-sDef :: NodeId -> NodeId -> ConstraintE Z3Repr
+sDef :: NodeId -> NodeId -> AnalysisConstraint Z3Var
 sDef m n =
-  toZ3Repr (S_Family m n) :=: rhs
+  SetFamily (S_Family m n) :=: rhs
   where
-    rhs :: Z3Repr (AnalysisSetFamily (Var, SensExpr))
+    rhs :: AnalysisExpr Z3Var (SetE (Var, SensExpr))
     rhs =
-      setCompr
+      SetCompr
         (\vs ->
-            let (v, s) = (varSens_varProj vs
-                         ,varSens_sensProj vs)
+            let (v, s) = (Fst vs
+                         ,Snd vs)
             in
-            varSens_pair v
-                         (ite (v `in_` toZ3Repr (B_Family m))
-                              (toZ3Repr (SensAtom Secret))
-                              s))
-        (\_ -> true)
-        (toZ3Repr (C_Exit n))
+            Pair v
+                 (Ite (v `In` SetFamily (B_Family m))
+                      (value (SensAtom Secret))
+                      s))
+        (\_ -> BoolVal True)
+        (SetFamily (C_Exit n))
 
 consistentSensitivity :: NodeId -> Z3Converter AST
 consistentSensitivity n = do
@@ -328,11 +324,17 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   --     -- liftIO $ hPutStrLn stderr str
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
+    liftIO $ putStrLn "1"
     mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
+    liftIO $ putStrLn "2"
     mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
+    liftIO $ putStrLn "3"
     mapM_ (assert <=< toZ3 . bDef) (map snd sPairs)
+    liftIO $ putStrLn "4"
     conv
+    liftIO $ putStrLn "5"
     correctnessCondition nodeIds
+    liftIO $ putStrLn "6"
 
   str <- solverToString
   liftIO $ hPutStrLn stderr str
@@ -377,24 +379,6 @@ lookupZ3Sort = lookupZ3' z3Info_sorts
 
   -- , z3Info_varSensConstructor :: FuncDecl
 
-varSens_pair :: Z3Repr Var -> Z3Repr SensExpr -> Z3Repr (Var, SensExpr)
-varSens_pair xM yM = Z3Repr $ do
-  x <- getZ3Repr xM
-  y <- getZ3Repr yM
-  construct <- z3Info_varSensConstructor <$> ask
-  mkApp construct [x, y]
-
-varSens_varProj :: Z3Repr (Var, SensExpr) -> Z3Repr Var
-varSens_varProj varSensM = Z3Repr $ do
-  varSens <- getZ3Repr varSensM
-  proj <- z3Info_varSens_varProj <$> ask
-  mkApp proj [varSens]
-
-varSens_sensProj :: Z3Repr (Var, SensExpr) -> Z3Repr SensExpr
-varSens_sensProj varSensM = Z3Repr $ do
-  varSens <- getZ3Repr varSensM
-  proj <- z3Info_varSens_sensProj <$> ask
-  mkApp proj [varSens]
 
 mkAppM :: MonadZ3 z3 => FuncDecl -> [z3 AST] -> z3 AST
 mkAppM decl = z3M (mkApp decl)
@@ -429,58 +413,11 @@ applyFamilyFn sf0 restArgs = do
   (sf, args) <- lookupSetFamilyFn sf0
   mkApp sf (args ++ restArgs)
 
-
-class BaseVar a where
-  baseVarPrefix_Sort :: proxy a -> (String, Z3Sort)
-
-instance BaseVar (SensExpr) where
-  baseVarPrefix_Sort _ = ("s", Sens_Sort)
-
-instance BaseVar Var where
-  baseVarPrefix_Sort _ = ("v", Var_Sort)
-
-class FreeVars a where
-  freeVars :: f a -> Z3Converter [(Sort, App, AST)]
-  mkZ3Var :: Z3Converter (Z3Var a)
-
--- lamRepr :: FreeVars a => Lam Z3Cs (a -> b) -> Z3Converter (Z3Var a)
--- lamRepr _ = mkZ3Var
-
--- instance FreeVars a => Repr Z3Var a where
---   type ReprM Z3Var a = Z3Converter
---   repr = mkZ3Var
-
 mkSymVar' :: (String, Z3Sort) -> Z3Converter (App, AST)
 mkSymVar' p = do
   (_, y, z) <- uncurry mkSymVar p
   return (y, z)
 
-instance (BaseVar a, BaseVar b, FreeVars a, FreeVars b) => FreeVars (a, b) where
-  freeVars _ = (<>) <$> freeVars (Proxy @a) <*> freeVars (Proxy @b)
-  mkZ3Var = Z3VarPair <$> mkSymVar' (baseVarPrefix_Sort @a Proxy)
-                      <*> mkSymVar' (baseVarPrefix_Sort @b Proxy)
-
-instance FreeVars SensExpr where
-  freeVars _ = do
-    x <- mkSymVar "s" Sens_Sort
-    return [x]
-  mkZ3Var = Z3VarSens <$> mkSymVar' ("s", Sens_Sort)
-
-instance FreeVars Var where
-  freeVars _ = do
-    x <- mkSymVar "v" Var_Sort
-    return [x]
-  mkZ3Var = Z3VarVar <$> mkSymVar' ("v", Var_Sort)
-
-getZ3VarASTs :: Z3Var a -> [AST]
-getZ3VarASTs (Z3VarSens x) = [snd x]
-getZ3VarASTs (Z3VarVar x) = [snd x]
-getZ3VarASTs (Z3VarPair x y) = [snd x, snd y]
-
-getZ3VarApps :: Z3Var a -> [App]
-getZ3VarApps (Z3VarSens x) = [fst x]
-getZ3VarApps (Z3VarVar x) = [fst x]
-getZ3VarApps (Z3VarPair x y) = [fst x, fst y]
 
 class ToZ3 a where
   toZ3 :: a -> Z3Converter AST
@@ -504,167 +441,139 @@ instance ToZ3 SensExpr where
 instance ToZ3 (AnalysisSetFamily a) where
   toZ3 = (`applyFamilyFn` [])
 
-instance ToZ3 (ConstraintE Z3Repr) where
-  toZ3 (x :=: y) = do
-    -- liftIO $ putStrLn "--- constraint ---"
-    x' <- getZ3Repr x
+newtype Z3Var = Z3Var { getZ3Var :: AST }
 
-    x_str <- astToString x'
-    -- liftIO $ putStrLn $ "- " <> x_str
+instance ToZ3 Bool where
+  toZ3 False = mkFalse
+  toZ3 True  = mkTrue
 
-    y' <- getZ3Repr y
-    y_str <- astToString y'
-    -- liftIO $ putStrLn $ "- " <> y_str
+instance ElemVal Z3Var where
+  type ElemRepr Z3Var = GetElemSort
 
-    -- liftIO $ putStrLn "------------------"
-    mkEq x' y'
+class GetElemSort a where
+  getElemSort :: proxy a -> Z3Sort
 
-newtype Z3Repr (a :: *) = Z3Repr { getZ3Repr :: Z3Converter AST }
-  deriving (Functor)
+instance GetElemSort a => GetElemSort (SetE a) where
+  getElemSort _ = getElemSort (Proxy @a)
 
-toZ3Repr :: ToZ3 a => a -> Z3Repr a
-toZ3Repr = Z3Repr . toZ3
-
-z3ReprLift :: (AST -> Z3Converter AST) -> (Z3Repr a -> Z3Repr b)
-z3ReprLift f xM = Z3Repr (f =<< getZ3Repr xM)
-
-z3ReprLift2 :: (AST -> AST -> Z3Converter AST) -> (Z3Repr a -> Z3Repr b -> Z3Repr c)
-z3ReprLift2 f xM yM = Z3Repr (f <$> getZ3Repr xM <!> getZ3Repr yM)
-
-z3ReprLift2List :: ([AST] -> Z3Converter AST) -> (Z3Repr a -> Z3Repr b -> Z3Repr c)
-z3ReprLift2List f xM yM = Z3Repr $ do
-  x <- getZ3Repr xM
-  y <- getZ3Repr yM
-  f [x, y]
-
-instance BoolExpr Z3Repr where
-  type EqualCt Z3Repr = ((~) SensExpr)
-
-  in_ = z3ReprLift2 mkSetMember
-
-  (^&&^) = z3ReprLift2List mkAnd
-
-  equal = z3ReprLift2 mkEq
-
-  true = Z3Repr mkTrue
-  false = Z3Repr mkFalse
-
-  ite condM tM fM = Z3Repr $ do
-    cond <- getZ3Repr condM
-    t <- getZ3Repr tM
-    f <- getZ3Repr fM
-    mkIte cond t f
-
-class (forall a. GetSort a => GetSort (set a)) => Z3Set set where
-  getZ3SetSort :: Proxy set -> Z3Converter Sort
-  toZ3Set :: set a -> Z3Converter AST
-
-instance Z3Set AnalysisSetFamily where
-  getZ3SetSort Proxy = lookupZ3Sort VarSens_Sort
-  toZ3Set = toZ3
-
-class GetSort a where
-  getElemSort :: SetCt Z3Repr set => proxy (set a) -> Z3Sort
-  getSetSort :: proxy a -> Z3Sort
-
-instance GetSort Var where
+instance GetElemSort Var where
   getElemSort _ = Var_Sort
-  getSetSort _ = VarSet_Sort
 
-instance GetSort SensExpr where
+instance GetElemSort SensExpr where
   getElemSort _ = Sens_Sort
-  getSetSort _ = SensSet_Sort
 
-instance GetSort (Var, SensExpr) where
+instance GetElemSort (Var, SensExpr) where
   getElemSort _ = VarSens_Sort
-  getSetSort _ = VarSensSet_Sort
 
-instance GetSort a => GetSort (AnalysisSetFamily a) where
-  getElemSort _ = getElemSort @a @AnalysisSetFamily Proxy
-  getSetSort _ = getSetSort @a Proxy
+getSetSort :: GetElemSort a => proxy a -> Z3Sort
+getSetSort p =
+  case getElemSort p of
+    Var_Sort -> VarSet_Sort
+    Sens_Sort -> SensSet_Sort
+    VarSens_Sort -> VarSensSet_Sort
+    _ -> error "getSetSort: Invalid sort"
 
-instance ToZ3 (Var, SensExpr) where
-  toZ3 (v, s) = do
+instance ToZ3 (Expr Z3Var Var SensExpr AnalysisSetFamily a) where
+  toZ3 (SetFamily sf) = toZ3 sf
+  toZ3 (MonoidVal v) = toZ3 v
+  toZ3 (BaseVal v) = toZ3 v
+  toZ3 (BoolVal b) = toZ3 b
+
+  toZ3 (In x xs) = mkSetMember <$> toZ3 x <!> toZ3 xs
+  toZ3 (And x y) = do
+    x' <- toZ3 x
+    y' <- toZ3 y
+    mkAnd [x', y']
+
+  toZ3 (Ite c t f) = do
+    c' <- toZ3 c
+    t' <- toZ3 t
+    f' <- toZ3 f
+    mkIte c' t' f'
+
+  toZ3 (BaseEqual x y) = mkEq <$> toZ3 x <!> toZ3 y
+  toZ3 (MonoidEqual x y) = mkEq <$> toZ3 x <!> toZ3 y
+
+  toZ3 (VarRepr (Z3Var v)) = return v
+
+  toZ3 (Pair x y) = do
     construct <- z3Info_varSensConstructor <$> ask
-    z3M (mkApp construct) [toZ3 v, toZ3 s]
+    z3M (mkApp construct) [toZ3 x, toZ3 y]
 
-instance Value Z3Repr where
-  type ValueCt Z3Repr = ToZ3
-  value = toZ3Repr
+  toZ3 (Fst x) = do
+    proj <- z3Info_varSens_varProj <$> ask
+    z3M (mkApp proj) [toZ3 x]
 
-instance SetExpr Z3Repr where
-  type SetCt Z3Repr = Z3Set
-  type SetElemCt Z3Repr = GetSort
+  toZ3 (Snd x) = do
+    proj <- z3Info_varSens_sensProj <$> ask
+    z3M (mkApp proj) [toZ3 x]
 
-  union = z3ReprLift2List mkSetUnion
-  unionSingle = z3ReprLift2 mkSetAdd
+  toZ3 (Union x y) = do
+    x' <- toZ3 x
+    y' <- toZ3 y
+    mkSetUnion [x', y']
 
-  empty :: forall (set :: * -> *) a. (GetSort a, SetCt Z3Repr set) => Z3Repr (set a)
-  empty = Z3Repr $ do
-    sort <- lookupZ3Sort $ getElemSort (Proxy @(set a))
-    mkEmptySet sort
-    -- sort <- getZ3SetSort (Proxy @set)
-    -- mkEmptySet sort
+  toZ3 (UnionSingle xs x) = do
+    xs' <- toZ3 xs
+    x' <- toZ3 x
+    xs_str <- astToString xs'
+    x_str <- astToString x'
+    liftIO $ putStrLn $ "(" ++ xs_str ++ ", " ++ x_str ++ ")"
+    mkSetAdd xs' x'
+  toZ3 Empty = mkEmptySet =<< lookupZ3Sort (getElemSort (Proxy @a))
 
-  setCompr f p sM = Z3Repr $ do
-    s <- getZ3Repr sM
+  toZ3 (SetCompr f p xs) = do
+    xs' <- toZ3 xs
+    (_, x_sym, x) <- mkSymVar "x" (getElemSort xs)
+    let xVar = VarRepr (Z3Var x)
 
-    (_, x_sym, x) <- mkSymVar "x" (getElemSort sM)
+    let pX = p xVar
+        fX = f xVar
 
-    pX <- getZ3Repr (p (Z3Repr (pure x)))
-    let fX' = f (Z3Repr (pure x))
-    fX <- getZ3Repr fX'
+    pX' <- toZ3 pX
+    fX' <- toZ3 fX
 
-    -- liftIO $ putStrLn $ "fX' sort = " ++ show (getSetSort fX')
-
-    -- set_sort <- lookupZ3Sort VarSens_Sort --mkSetSort =<< getSort fX
-    set_sort <- lookupZ3Sort $ getSetSort fX'
+    set_sort <- lookupZ3Sort (getSetSort fX)
 
     uniq <- get
     modify succ
 
     compr_sym <- mkStringSymbol ("compr" <> show uniq)
 
-
     compr <- mkConst compr_sym set_sort
 
-    liftIO $ putStrLn "before assert *****"
-
-    -- liftIO $ putStrLn $ "--- Using set_sort = " <> show (getSetSort fX')
-    -- s_str <- astToString s
-    -- fX_str <- astToString fX
-    -- pX_str <- astToString pX
-    -- liftIO $ putStrLn $ "setCompr: fX = " <> fX_str
-    -- liftIO $ putStrLn $ "setCompr: pX = " <> pX_str
-    -- liftIO $ putStrLn $ "setCompr: s = " <> s_str
-
-    ast <- (mkForallConst [] [x_sym]
-      =<<
-        (mkIff <$> (z3M mkAnd [mkSetMember x s, pure pX])
-               <!> (mkSetMember fX compr)))
-
-    ast_str <- astToString ast
-    liftIO $ putStrLn $ "setCompr: " <> ast_str
-
-    trackingAssert ast
-    liftIO $ putStrLn "after assert +++++"
-
+    mkForallConst [] [x_sym]
+      =<< 
+        (mkIff <$> (z3M mkAnd [mkSetMember x xs', pure pX'])
+               <!> (mkSetMember fX' compr))
 
     return compr
 
-instance LatticeExpr Z3Repr where
-  type LatticeCt Z3Repr = ((~) SensExpr)
-
-  lub setM = Z3Repr $ do
-    set <- getZ3Repr setM
+  toZ3 (Lub xs) = do
+    xs' <- toZ3 xs
     setJoin <- z3Info_sens_setJoin <$> ask
 
-    mkApp setJoin [set]
+    mkApp setJoin [xs']
 
-constraintsToZ3 :: Constraints -> Z3Converter ()
+instance ToZ3 (AnalysisConstraint Z3Var) where
+  toZ3 (x :=: y) = do
+    -- liftIO $ putStrLn "--- constraint ---"
+    x' <- toZ3 x --getZ3Repr x
+
+    x_str <- astToString x'
+    -- liftIO $ putStrLn $ "- " <> x_str
+
+    y' <- toZ3 y --getZ3Repr y
+    y_str <- astToString y'
+    -- liftIO $ putStrLn $ "- " <> y_str
+
+    -- liftIO $ putStrLn "------------------"
+    mkEq x' y'
+
+constraintsToZ3 :: Constraints Z3Var -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs
-    (\(SomeConstraint (c :: ConstraintE Z3Repr)) -> trackingAssert =<< toZ3 c)
+    (\c -> trackingAssert =<< toZ3 c)
   return ()
 
 
@@ -747,10 +656,9 @@ main = do
         Right parsed -> do
           let parsed' = flip runState (NodeId 0) $ traverse (\x -> (x,) <$> newNodeId) parsed
               parsed'' = first (fmap snd) parsed'
-              results = execConstraintGen (void (transformM (constAction handleTransUnit) parsed'')) :: ConstraintGenResults
+              constraints = execConstraintGen (void (transformM (constAction handleTransUnit) parsed'')) -- :: ConstraintGenResults
 
-              constraints = cgConstraints results
-              used = cgUsed results
+              used = getUsedIds constraints
               nodeLocs = map (nodeIdToLoc (fst parsed')) (getAnns (fst parsed''))
               theNodeIds = nodeIdsUsed used
 

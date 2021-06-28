@@ -39,43 +39,97 @@ import           Data.Semigroup
 import           Ppr
 import           Pattern
 
-class Unconstrained (a :: k)
-instance Unconstrained a
+data SetE a
 
-class BoolExpr repr where
-  type EqualCt repr :: * -> Constraint
+class ElemVal r where
+  type ElemRepr r :: * -> Constraint
 
-  in_ :: (SetExpr repr, SetCt repr set) => repr a -> repr (set a) -> repr Bool
-  (^&&^) :: repr Bool -> repr Bool -> repr Bool
-  equal :: EqualCt repr a => repr a -> repr a -> repr Bool
+-- instance ElemVal f => ElemVal (SetE f) where
+--   type ElemRepr (SetE a) = ElemRepr f
+--   elemRepr _ = elemRepr (Proxy @a)
 
-  true :: repr Bool
-  false :: repr Bool
+data Expr r base m f t where
+  SetFamily :: f a -> Expr r base m f (SetE a)
+  BaseVal :: base -> Expr r base m f a
+  MonoidVal :: m -> Expr r base m f m
+  BoolVal :: Bool -> Expr r base m f Bool
 
-  ite :: repr Bool -> repr a -> repr a -> repr a
+  VarRepr :: r -> Expr r base m f a -- For use in representing lambdas
 
-class SetExpr repr where
-  type SetCt repr :: (* -> *) -> Constraint
-  type SetElemCt repr :: * -> Constraint
+  Pair :: Expr r base m f a -> Expr r base m f b -> Expr r base m f (a, b)
+  Fst :: Expr r base m f (a, b) -> Expr r base m f a
+  Snd :: Expr r base m f (a, b) -> Expr r base m f b
 
-  union :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr (set a) -> repr (set a)
-  unionSingle :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr a -> repr (set a)
-  empty :: (SetCt repr set, SetElemCt repr a) => repr (set a)
+  In :: Expr r base m f a -> Expr r base m f (SetE a) -> Expr r base m f Bool
+  And :: Expr r base m f Bool -> Expr r base m f Bool -> Expr r base m f Bool
+  BaseEqual :: Expr r base m f base -> Expr r base m f base -> Expr r base m f Bool
+  MonoidEqual :: Expr r base m f m -> Expr r base m f m -> Expr r base m f Bool
+  Ite :: Expr r base m f Bool -> Expr r base m f a -> Expr r base m f a -> Expr r base m f a
 
-  setCompr :: (SetCt repr set, SetElemCt repr a, SetElemCt repr b) => (repr a -> repr b) -> (repr a -> repr Bool) -> repr (set a) -> repr (set b)
+  Union :: Expr r base m f (SetE a) -> Expr r base m f (SetE a) -> Expr r base m f (SetE a)
+  UnionSingle :: Expr r base m f (SetE a) -> Expr r base m f a -> Expr r base m f (SetE a)
+  Empty :: (ElemVal r, ElemRepr r a) => Expr r base m f (SetE a)
 
-class LatticeExpr repr where
-  type LatticeCt repr :: * -> Constraint
+  SetCompr :: (ElemVal r, ElemRepr r a, ElemRepr r b) => (forall r. Expr r base m f a -> Expr r base m f b) -> (forall r. Expr r base m f a -> Expr r base m f Bool) -> Expr r base m f (SetE a) -> Expr r base m f (SetE b)
 
-  lub :: (SetExpr repr, SetCt repr set, LatticeCt repr a) => repr (set a) -> repr a
+  Lub :: Expr r base m f (SetE m) -> Expr r base m f m
 
-class Value repr where
-  type ValueCt repr :: * -> Constraint
+-- class ExprEq a
 
-  value :: ValueCt repr a => a -> repr a
+class Value e v where
+  value :: v -> e
 
-type Expr repr = (BoolExpr repr, SetExpr repr, LatticeExpr repr, Value repr)
+instance Value (Expr r base m f base) base where value = BaseVal
+instance Value (Expr r base m f m) m where value = MonoidVal
+instance Value (Expr r base m f (SetE a)) (f a) where value = SetFamily
+instance Value (Expr r base m f Bool) Bool where value = BoolVal
+instance (Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Expr r base m f (a, b)) (a, b) where
+  value (x, y) = Pair (value x) (value y)
 
-data ConstraintE repr where
-  (:=:) :: {- (Expr repr) => -} repr a -> repr a -> ConstraintE repr
+-- pairVal :: (a, b) -> Expr r base m f (a, b)
+-- pairVal = uncurry Pair
+
+
+data ConstraintE r base m f where
+  (:=:) :: Expr r base m f a -> Expr r base m f a -> ConstraintE r base m f
+
+-- class Unconstrained (a :: k)
+-- instance Unconstrained a
+
+-- class BoolExpr repr where
+--   type EqualCt repr :: * -> Constraint
+
+--   in_ :: (SetExpr repr, SetCt repr set) => repr a -> repr (set a) -> repr Bool
+--   (^&&^) :: repr Bool -> repr Bool -> repr Bool
+--   equal :: EqualCt repr a => repr a -> repr a -> repr Bool
+
+--   true :: repr Bool
+--   false :: repr Bool
+
+--   ite :: repr Bool -> repr a -> repr a -> repr a
+
+-- class SetExpr repr where
+--   type SetCt repr :: (* -> *) -> Constraint
+--   type SetElemCt repr :: * -> Constraint
+
+--   union :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr (set a) -> repr (set a)
+--   unionSingle :: (SetCt repr set, SetElemCt repr a) => repr (set a) -> repr a -> repr (set a)
+--   empty :: (SetCt repr set, SetElemCt repr a) => repr (set a)
+
+--   setCompr :: (SetCt repr set, SetElemCt repr a, SetElemCt repr b) => (repr a -> repr b) -> (repr a -> repr Bool) -> repr (set a) -> repr (set b)
+
+-- class LatticeExpr repr where
+--   type LatticeCt repr :: * -> Constraint
+
+--   lub :: (SetExpr repr, SetCt repr set, LatticeCt repr a) => repr (set a) -> repr a
+
+-- class Value repr where
+--   type ValueCt repr :: * -> Constraint
+
+--   value :: ValueCt repr a => a -> repr a
+
+-- type Expr repr = (BoolExpr repr, SetExpr repr, LatticeExpr repr, Value repr)
+
+-- data ConstraintE repr where
+--   (:=:) :: {- (Expr repr) => -} repr a -> repr a -> ConstraintE repr
 

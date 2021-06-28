@@ -291,7 +291,6 @@ instance SetExpr EntryExitTracker where
   type SetCt EntryExitTracker = Unconstrained
   type SetElemCt EntryExitTracker = Unconstrained
 
-  setValue = error "EntryExitTracker: setValue"
   x `union` y = x <> y
   x `unionSingle` y = x <> entryExitRetag y
   empty = EntryExitTracker $ return ()
