@@ -52,6 +52,8 @@ import           Data.Proxy
 import           Data.Kind
 import           Data.Constraint
 
+import           Data.Foldable
+
 import qualified Data.ByteString as BS
 
 import           Data.Maybe (maybeToList)
@@ -295,21 +297,78 @@ consistentSensitivity n = do
   (sens_sort, s_sym, s) <- mkSymVar "s" Sens_Sort
   (_, s2_sym, s2) <- mkSymVar "s2" Sens_Sort
 
+  -- c_exit_fn <- lookupZ3FuncDecl (C_Exit (error "consistentSensitivity: this should not be reached"))
+  -- c_exit <- mkApp c_exit_fn [n]
   c_exit <- toZ3 (C_Exit n)
 
   varSens <- z3Info_varSensConstructor <$> ask
+
+  public <- toZ3 Public
+  secret <- toZ3 Secret
+
+  -- mkForallConst [] [v_sym] =<<
+  --   z3M mkAnd
+  --     [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
+  --
+  --     , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
+  --     ]
 
   mkForallConst [] [v_sym, s_sym, s2_sym]
     =<< (mkImplies <$> (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit])
                    <!> (mkEq s s2))
 
-correctnessCondition :: [NodeId] -> Z3Converter ()
-correctnessCondition nodeIds = do
-  asts <- mapM consistentSensitivity nodeIds
-  -- mapM_ trackingAssert asts
-  mapM_ assert asts
+data AnalysisResult = Correct | Incorrect String
+  deriving (Show)
 
-evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
+-- instance Show Model where
+--   show = _ . showModel
+
+instance Semigroup AnalysisResult where
+  Incorrect x <> _ = Incorrect x
+  _ <> Incorrect y = Incorrect y
+  Correct <> Correct = Correct
+
+instance Monoid AnalysisResult where
+  mempty = Correct
+
+correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
+correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
+  solverPush
+
+  trackingAssert =<< mkNot =<< consistentSensitivity n
+
+  checkResult <- check
+  result <- case checkResult of
+               Sat -> do
+                 (_, modelM) <- getModel
+                 case modelM of
+                   Nothing -> return $ Incorrect "<no model>"
+                   Just model -> do
+                     modelStr <- showModel model
+                     return $ Incorrect modelStr
+               Unsat -> do
+                 coreStr <- unlines <$> (mapM astToString =<< getUnsatCore)
+                 liftIO $ putStrLn coreStr
+                 return Correct
+               Undef -> do
+                 solverPop 1
+
+                 trackingAssert =<< consistentSensitivity n
+                 checkResult' <- check
+                 -- (_, modelM) <- getModel
+                 -- modelStr <- case modelM of
+                 --   Nothing -> return "<no model>"
+                 --   Just model -> showModel model
+
+                 error $ "<undef>: node: " ++ show n ++ "\n" ++ show checkResult'
+
+  solverPop 1
+  return result
+
+-- evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
+evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO AnalysisResult
 evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   params <- mkParams
   paramsSetBool params <$> mkStringSymbol "core.minimize" <!> pure True
@@ -329,27 +388,26 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
     liftIO $ putStrLn "2"
     mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
     liftIO $ putStrLn "3"
-    mapM_ (assert <=< toZ3 . bDef) (map snd sPairs)
+    mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
     liftIO $ putStrLn "4"
     conv
     liftIO $ putStrLn "5"
     correctnessCondition nodeIds
-    liftIO $ putStrLn "6"
 
-  str <- solverToString
-  liftIO $ hPutStrLn stderr str
-  liftIO $ hFlush stderr
+  -- str <- solverToString
+  -- liftIO $ hPutStrLn stderr str
+  -- liftIO $ hFlush stderr
 
-  _ <- check
-  -- pure (r, Left [])
+  -- _ <- check
+  -- -- pure (r, Left [])
 
-  (r, model) <- getModel
-  modelOrCore <- case model of
-    Nothing -> do
-      core <- getUnsatCore
-      Left <$> mapM astToString core
-    Just m -> Right <$> showModel m
-  pure (r, modelOrCore)
+  -- (r, model) <- getModel
+  -- modelOrCore <- case model of
+  --   Nothing -> do
+  --     core <- getUnsatCore
+  --     Left <$> mapM astToString core
+  --   Just m -> Right <$> showModel m
+  -- pure (r, modelOrCore)
 
 class Z3FuncDecl a where
   lookupZ3FuncDecl :: a -> Z3Converter FuncDecl
@@ -542,9 +600,9 @@ instance ToZ3 (Expr Z3Var Var SensExpr AnalysisSetFamily a) where
 
     compr <- mkConst compr_sym set_sort
 
-    assert =<< mkForallConst [] [x_sym]
+    trackingAssert =<< mkForallConst [] [x_sym]
       =<< 
-        (mkIff <$> (z3M mkAnd [mkSetMember x xs', pure pX'])
+        (mkImplies <$> (z3M mkAnd [mkSetMember x xs', pure pX'])
                <!> (mkSetMember fX' compr))
 
     return compr
@@ -573,7 +631,11 @@ instance ToZ3 (AnalysisConstraint Z3Var) where
 constraintsToZ3 :: Constraints Z3Var -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs
-    (\c -> trackingAssert =<< toZ3 c)
+    (\c -> do
+      ast <- toZ3 c
+      astString <- astToString ast
+      liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
+      trackingAssert ast)
   return ()
 
 
@@ -674,20 +736,21 @@ main = do
           putStrLn $ "vars = " <> show (varsUsed used)
           -- putStrLn $ "nodeLocs = " <> show nodeLocs
 
-          (r, modelStr_maybe) <- evalZ3Converter (Set.toList (varsUsed used))
+          result  <- evalZ3Converter (Set.toList (varsUsed used))
                                                  (Set.toList theNodeIds)
                                                  (Set.toList sPairs)
                                                  (Set.toList tPairs)
                                                  (constraintsToZ3 constraints)
-          -- print r
+          print result
+          -- -- print r
 
 
-          -- putStrLn $ genDOT' constraints
-          hPrint stderr r
-          -- hPrint stderr modelStr_maybe
+          -- -- putStrLn $ genDOT' constraints
+          -- hPrint stderr r
+          -- -- hPrint stderr modelStr_maybe
 
-          case modelStr_maybe of
-            Left core -> putStrLn $ "Unsat core:\n" <> unlines core
-            Right modelStr -> do
-              putStrLn $ "Model:\n" <> modelStr
+          -- case modelStr_maybe of
+          --   Left core -> putStrLn $ "Unsat core:\n" <> unlines core
+          --   Right modelStr -> do
+          --     putStrLn $ "Model:\n" <> modelStr
 

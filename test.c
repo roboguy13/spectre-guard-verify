@@ -1,11 +1,11 @@
-#include <stdio.h>
+// #include <stdio.h>
 
 int test() {
   int y __attribute__((nospec));
-  int w __attribute__((nospec));
+  // int w __attribute__((nospec));
   int z;
   int x;
-  x = z;
+  x = y;
   // w = y;
 
   //if (y == 0) {

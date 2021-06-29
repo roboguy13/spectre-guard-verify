@@ -195,7 +195,8 @@ handleExpr :: AnalysisCt r => CExpression NodeId -> ConstraintGen r ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
-  e0 `connect` e
+  -- e0 `connect` e
+  tell [ SetFamily (C_Entry (annotation e)) :=: SetFamily (C_Entry (annotation e0)) ]
 
   tell [ (SetFamily (E_Family (annotation e0)) :=: Union (value (E_Family (annotation cv)))
                                                        (value (E_Family (annotation e)))) ]
@@ -207,8 +208,10 @@ handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
        ]
     *> handleExpr e
 
-handleExpr e@(CVar (Ident _ x _) _) =
-  tell [ (SetFamily (E_Family (annotation e)) :=: UnionSingle Empty (value (Var x))) ]
+handleExpr e@(CVar (Ident _ x _) _) = do
+  nop e
+  tell [ (SetFamily (E_Family (annotation e)) :=: UnionSingle Empty (value (Var x)))
+       ]
 
 handleExpr expr = do
   nop expr
