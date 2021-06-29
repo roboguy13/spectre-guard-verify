@@ -337,7 +337,7 @@ correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   solverPush
 
-  trackingAssert =<< mkNot =<< consistentSensitivity n
+  trackingAssert =<< consistentSensitivity n
 
   checkResult <- check
   result <- case checkResult of
@@ -730,6 +730,7 @@ main = do
           let tPairs = tNodesUsed used
               sPairs = sPairsUsed used
 
+          print parsed''
           putStrLn $ "tNodes = " <> show tPairs
           putStrLn $ "sPairs = " <> show sPairs
           putStrLn $ "nodeIds = " <> show theNodeIds

@@ -169,9 +169,10 @@ handleDeclarator e = nop e
 
 handleCompoundItem :: AnalysisCt r => CCompoundBlockItem NodeId -> ConstraintGen r ()
 handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
-handleCompoundItem (CBlockDecl e@(CDecl declSpec xs _)) = do
+handleCompoundItem e0@(CBlockDecl e@(CDecl declSpec xs _)) = do
     -- nop e
 
+    sameNode e0 e
     mapM_ (sameNode e) declSpec
 
     -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
@@ -195,8 +196,11 @@ handleExpr :: AnalysisCt r => CExpression NodeId -> ConstraintGen r ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
+  
+
   -- e0 `connect` e
   tell [ SetFamily (C_Entry (annotation e)) :=: SetFamily (C_Entry (annotation e0)) ]
+  tell [ SetFamily (C_Entry (annotation cv)) :=: SetFamily (C_Entry (annotation e0)) ]
 
   tell [ (SetFamily (E_Family (annotation e0)) :=: Union (value (E_Family (annotation cv)))
                                                        (value (E_Family (annotation e)))) ]
