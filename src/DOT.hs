@@ -267,7 +267,15 @@ genConnections connect endpointA e = do
   return $ map (connect endpointA) entries
            ++ map (connect endpointA) exits
 
+genEmpty :: NodeId -> (NodeId -> String) -> DOTM s [String]
+genEmpty n nodeName = do
+  entryEq <- entryEquiv
+  nDesc <- liftSTT $ classDesc entryEq n
+  return [dotConnectWithColor "red" (show "{ }") (nodeClassName nodeName nDesc)]
+
 genDOTFor' :: AnalysisConstraint r -> DOTM s [String]
+genDOTFor' (SetFamily (C_Entry n) :=: Empty) = genEmpty n entry
+genDOTFor' (SetFamily (C_Exit n)  :=: Empty) = genEmpty n exit
 genDOTFor' (SetFamily (C_Entry n) :=: y) = do
   entryEq <- entryEquiv
   nDesc <- liftSTT $ classDesc entryEq n
