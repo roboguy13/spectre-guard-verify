@@ -172,11 +172,11 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
 handleDeclarator e = nop e
 
 handleCompoundItem :: AnalysisCt r => CCompoundBlockItem NodeId -> ConstraintGen r ()
-handleCompoundItem (CBlockDecl e@(CDecl _ [] _)) = nop e
-handleCompoundItem e0@(CBlockDecl e@(CDecl declSpec xs _)) = do
+handleCompoundItem e@(CBlockDecl (CDecl _ [] _)) = nop e
+handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
     -- nop e
 
-    sameNode e0 e
+    -- sameNode e0 e
     mapM_ (sameNode e) declSpec
 
     -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs

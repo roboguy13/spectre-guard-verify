@@ -729,6 +729,7 @@ main = do
               sPairs = sPairsUsed used
 
           -- print parsed''
+
           -- putStrLn $ "tNodes = " <> show tPairs
           -- putStrLn $ "sPairs = " <> show sPairs
           -- putStrLn $ "nodeIds = " <> show theNodeIds
