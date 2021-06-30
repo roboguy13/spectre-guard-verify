@@ -101,11 +101,9 @@ tellVars vs = tell mempty { varsUsed = vs }
 tellNodeIds :: Set NodeId -> Writer UsedIds ()
 tellNodeIds ns = tell mempty { nodeIdsUsed = ns }
 
-getUsedIds :: Constraints r -> UsedIds
-getUsedIds = execWriter . mapM go
+getUsedIds_constraint :: AnalysisConstraint r -> Writer UsedIds ()
+getUsedIds_constraint (x :=: y) = goE x >> goE y
   where
-    go (x :=: y) = goE x >> goE y
-
     goSF :: AnalysisSetFamily a -> Writer UsedIds ()
     goSF (C_Entry n) = tellNodeIds [n]
     goSF (C_Exit n)  = tellNodeIds [n]
@@ -138,6 +136,12 @@ getUsedIds = execWriter . mapM go
 
     goE (SetCompr {}) = return () -----
     goE (Lub xs) = goE xs
+
+getUsedIds' :: AnalysisConstraint r -> UsedIds
+getUsedIds' = execWriter . getUsedIds_constraint
+
+getUsedIds :: Constraints r -> UsedIds
+getUsedIds = execWriter . mapM getUsedIds_constraint
 
 type AnalysisCt r = (ElemVal r, ElemRepr r (Var, SensExpr), ElemRepr r Var)
 

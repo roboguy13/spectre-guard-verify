@@ -730,11 +730,12 @@ main = do
           let tPairs = tNodesUsed used
               sPairs = sPairsUsed used
 
-          print parsed''
-          putStrLn $ "tNodes = " <> show tPairs
-          putStrLn $ "sPairs = " <> show sPairs
-          putStrLn $ "nodeIds = " <> show theNodeIds
-          putStrLn $ "vars = " <> show (varsUsed used)
+          -- print parsed''
+          -- putStrLn $ "tNodes = " <> show tPairs
+          -- putStrLn $ "sPairs = " <> show sPairs
+          -- putStrLn $ "nodeIds = " <> show theNodeIds
+          -- putStrLn $ "vars = " <> show (varsUsed used)
+
           -- putStrLn $ "nodeLocs = " <> show nodeLocs
 
           result  <- evalZ3Converter (Set.toList (varsUsed used))
@@ -742,7 +743,11 @@ main = do
                                                  (Set.toList sPairs)
                                                  (Set.toList tPairs)
                                                  (constraintsToZ3 constraints)
-          print result
+
+          return ()
+
+          -- print result
+
           -- -- print r
 
 
