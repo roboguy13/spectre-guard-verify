@@ -20,6 +20,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {-# LANGUAGE QuantifiedConstraints #-}
 
@@ -66,7 +67,7 @@ import           Ppr
 import           SetExpr
 import           Pattern
 import           ConstraintGen
--- import           DOT
+import           DOT
 
 -- data Z3Var a = Z3Var { getZ3Var :: AST }
 
@@ -383,15 +384,10 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   --     -- liftIO $ hPutStrLn stderr str
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
-    liftIO $ putStrLn "1"
     mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
-    liftIO $ putStrLn "2"
     mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
-    liftIO $ putStrLn "3"
     mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
-    liftIO $ putStrLn "4"
     conv
-    liftIO $ putStrLn "5"
     correctnessCondition nodeIds
 
   -- str <- solverToString
@@ -576,7 +572,9 @@ instance ToZ3 (Expr Z3Var Var SensExpr AnalysisSetFamily a) where
     x' <- toZ3 x
     xs_str <- astToString xs'
     x_str <- astToString x'
-    liftIO $ putStrLn $ "(" ++ xs_str ++ ", " ++ x_str ++ ")"
+
+    -- liftIO $ putStrLn $ "(" ++ xs_str ++ ", " ++ x_str ++ ")"
+
     mkSetAdd xs' x'
   toZ3 Empty = mkEmptySet =<< lookupZ3Sort (getElemSort (Proxy @a))
 
@@ -634,7 +632,7 @@ constraintsToZ3 cs = do
     (\c -> do
       ast <- toZ3 c
       astString <- astToString ast
-      liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
+      -- liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
       trackingAssert ast)
   return ()
 
@@ -737,6 +735,8 @@ main = do
           -- putStrLn $ "vars = " <> show (varsUsed used)
 
           -- putStrLn $ "nodeLocs = " <> show nodeLocs
+
+          putStrLn $ genDOT' constraints
 
           result  <- evalZ3Converter (Set.toList (varsUsed used))
                                                  (Set.toList theNodeIds)
