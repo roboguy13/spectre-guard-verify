@@ -5,6 +5,8 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
+{-# OPTIONS_GHC -Wincomplete-patterns #-}
+
 module DOT (genDOT, genDOT', DOTConfig(..), defaultDOTConfig) where
 
 import           SetExpr
@@ -139,8 +141,8 @@ class BoundaryNodes a where
   getExitNodes :: a -> Set NodeId
 
 instance BoundaryNodes (AnalysisConstraint r) where
-  getEntryNodes (x :=: y) = getEntryNodes x <> getEntryNodes y
-  getExitNodes  (x :=: y) = getExitNodes x <> getExitNodes y
+  getEntryNodes c = withConstraintSides c $ \(x, y) -> getEntryNodes x <> getEntryNodes y
+  getExitNodes  c = withConstraintSides c $ \(x, y) -> getExitNodes x <> getExitNodes y
 
 instance BoundaryNodes (Constraints r) where
   getEntryNodes = foldr (<>) mempty . map getEntryNodes
@@ -179,7 +181,7 @@ nodeClassName :: (NodeId -> String) -> [NodeId] -> String
 nodeClassName f = intercalate "_" . map f
 
 genBoundaries :: [NodeId] -> [NodeId] -> AnalysisConstraint r -> DOTM s [String]
-genBoundaries actualEntries actualExits c@(x :=: y) = do
+genBoundaries actualEntries actualExits c = withConstraintSides c $ \(x, y) -> do
   let allNodeIds = toList $ nodeIdsUsed $ getUsedIds' c
       -- actualEntries = toList $ getEntryNodes x <> getEntryNodes y
       -- actualExits = toList $ getExitNodes x <> getExitNodes y
@@ -273,19 +275,27 @@ genEmpty n nodeName = do
   nDesc <- liftSTT $ classDesc entryEq n
   return [dotConnectWithColor "red" (show "{ }") (nodeClassName nodeName nDesc)]
 
+constraintColor :: AnalysisConstraint r -> String
+constraintColor (_ :=: _) = "red"
+constraintColor (_ :<: _) = "blue"
+
 genDOTFor' :: AnalysisConstraint r -> DOTM s [String]
-genDOTFor' (SetFamily (C_Entry n) :=: Empty) = genEmpty n entry
-genDOTFor' (SetFamily (C_Exit n)  :=: Empty) = genEmpty n exit
-genDOTFor' (SetFamily (C_Entry n) :=: y) = do
-  entryEq <- entryEquiv
-  nDesc <- liftSTT $ classDesc entryEq n
-  genConnections (flip (dotConnectWithColor "red")) (nodeClassName entry nDesc) y
+genDOTFor' c = withConstraintSides c $ \p ->
+  case p of
+    (SetFamily (C_Entry n), Empty) -> genEmpty n entry
+    (SetFamily (C_Exit n), Empty) -> genEmpty n exit
+    (SetFamily (C_Entry n), y) -> do
+      entryEq <- entryEquiv
+      nDesc <- liftSTT $ classDesc entryEq n
 
-genDOTFor' (SetFamily (C_Exit n) :=: y) = do
-  exitEq <- exitEquiv
-  nDesc <- liftSTT $ classDesc exitEq n
+      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
 
-  genConnections (flip (dotConnectWithColor "red")) (nodeClassName exit nDesc) y
-genDOTFor' (SetFamily (E_Family {}) :=: _) = return []
-genDOTFor' (SetFamily (S_Family {}) :=: _) = return []
+    (SetFamily (C_Exit n), y) -> do
+      exitEq <- exitEquiv
+      nDesc <- liftSTT $ classDesc exitEq n
+
+      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName exit nDesc) y
+    (SetFamily (E_Family {}), _) -> return []
+    (SetFamily (S_Family {}), _) -> return []
+    (_, _) -> return []
 

@@ -93,6 +93,19 @@ instance (Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Ex
 data ConstraintE r base m f where
   (:=:) :: Expr r base m f a -> Expr r base m f a -> ConstraintE r base m f
 
+  -- | (Non-strict) subset relation constraint
+  (:<:) :: Expr r base m f (SetE a) -> Expr r base m f (SetE a) -> ConstraintE r base m f
+
+data ConstraintType = EqualityConstraint | SubsetConstraint
+
+constraintType :: ConstraintE r base m f -> ConstraintType
+constraintType (_ :=: _) = EqualityConstraint
+constraintType (_ :<: _) = SubsetConstraint
+
+withConstraintSides :: ConstraintE r base m f -> (forall x. (Expr r base m f x, Expr r base m f x) -> b) -> b
+withConstraintSides (x :=: y) k = k (x, y)
+withConstraintSides (x :<: y) k = k (x, y)
+
 -- class Unconstrained (a :: k)
 -- instance Unconstrained a
 

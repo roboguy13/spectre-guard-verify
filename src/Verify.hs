@@ -626,6 +626,11 @@ instance ToZ3 (AnalysisConstraint Z3Var) where
     -- liftIO $ putStrLn "------------------"
     mkEq x' y'
 
+  toZ3 (x :<: y) = do
+    x' <- toZ3 x
+    y' <- toZ3 y
+    mkSetSubset x' y'
+
 constraintsToZ3 :: Constraints Z3Var -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs

@@ -102,7 +102,10 @@ tellNodeIds :: Set NodeId -> Writer UsedIds ()
 tellNodeIds ns = tell mempty { nodeIdsUsed = ns }
 
 getUsedIds_constraint :: AnalysisConstraint r -> Writer UsedIds ()
-getUsedIds_constraint (x :=: y) = goE x >> goE y
+getUsedIds_constraint ct =
+  case ct of
+    x :=: y -> goE x >> goE y
+    x :<: y -> goE x >> goE y
   where
     goSF :: AnalysisSetFamily a -> Writer UsedIds ()
     goSF (C_Entry n) = tellNodeIds [n]
@@ -322,9 +325,13 @@ connect x y =
 sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen r ()
 sameNode x y =
   tell
-    [ (SetFamily (C_Entry (annotation x)) :=: value (C_Entry (annotation y)))
-    , (SetFamily (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y)))
+    [ SetFamily (C_Entry (annotation y)) :<: value (C_Entry (annotation x))
+    , SetFamily (C_Exit  (annotation y)) :<: value (C_Exit  (annotation x))
     ]
+  -- tell
+  --   [ (SetFamily (C_Entry (annotation x)) :=: value (C_Entry (annotation y)))
+  --   , (SetFamily (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y)))
+  --   ]
 
 -- TODO: Connect to following nodes
 handleFunDef :: AnalysisCt r => CFunctionDef NodeId -> ConstraintGen r ()
