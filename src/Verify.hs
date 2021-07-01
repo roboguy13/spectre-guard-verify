@@ -336,7 +336,7 @@ instance Monoid AnalysisResult where
 
 correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
-  solverPush
+  -- solverPush
 
   trackingAssert =<< mkNot =<< consistentSensitivity n
 
@@ -354,7 +354,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
                  liftIO $ putStrLn coreStr
                  return Correct
                Undef -> do
-                 solverPop 1
+                 -- solverPop 1
 
                  trackingAssert =<< consistentSensitivity n
                  checkResult' <- check
@@ -365,7 +365,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
 
                  error $ "<undef>: node: " ++ show n ++ "\n" ++ show checkResult'
 
-  solverPop 1
+--   solverPop 1
   return result
 
 -- evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
@@ -642,7 +642,7 @@ constraintsToZ3 cs = do
 
       astString <- astToString ast
       -- unless generateDOT $
-      liftIO $ hPutStrLn stderr $ "constraint: {\n" ++ astString  ++ "\n}"
+      -- liftIO $ hPutStrLn stderr $ "constraint: {\n" ++ astString  ++ "\n}"
 
       trackingAssert ast)
   return ()
@@ -739,7 +739,7 @@ main = do
           let tPairs = tNodesUsed used
               sPairs = sPairsUsed used
 
-          hPrint stderr parsed''
+          -- hPrint stderr parsed''
 
           -- print parsed''
 
@@ -750,7 +750,7 @@ main = do
 
           -- putStrLn $ "nodeLocs = " <> show nodeLocs
 
-          when generateDOT $ putStrLn $ genDOT' constraints
+          -- when generateDOT $ putStrLn $ genDOT' constraints
 
           result  <- evalZ3Converter (Set.toList (varsUsed used))
                                                  (Set.toList theNodeIds)
@@ -760,7 +760,7 @@ main = do
 
           return ()
 
-          -- print result
+          print result
 
           -- -- print r
 

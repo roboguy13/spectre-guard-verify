@@ -304,9 +304,13 @@ handleStmt e@(CCompound _ items _) = do
   case items of
     [] -> pure ()
     (firstItem:_) -> do --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
-      e `connect` firstItem
-      -- tell [ SetFamily (C_Exit (annotation e)) :=: SetFamily (C_Exit (annotation (last items))) ]
-      tell [ SetFamily (C_Exit (annotation (last items))) :>: SetFamily (C_Exit (annotation e)) ]
+
+      tell [ SetFamily (C_Entry (annotation firstItem)) :=: SetFamily (C_Entry (annotation e)) ]
+
+      -- e `connect` firstItem
+
+      tell [ SetFamily (C_Exit (annotation e)) :=: SetFamily (C_Exit (annotation (last items))) ]
+      -- tell [ SetFamily (C_Exit (annotation (last items))) :>: SetFamily (C_Exit (annotation e)) ]
 
   connectList items
   mapM_ handleCompoundItem items
