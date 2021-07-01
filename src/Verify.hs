@@ -336,7 +336,7 @@ instance Monoid AnalysisResult where
 
 correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = do
-  fmap mconcat . forM nodeIds $ \n -> trackingAssert {- =<< mkNot -} =<< consistentSensitivity n
+  -- fmap mconcat . forM nodeIds $ \n -> trackingAssert {- =<< mkNot -} =<< consistentSensitivity n
 
   checkResult <- check
   result <- case checkResult of
