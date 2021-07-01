@@ -277,7 +277,7 @@ genEmpty n nodeName = do
 
 constraintColor :: AnalysisConstraint r -> String
 constraintColor (_ :=: _) = "red"
-constraintColor (_ :<: _) = "blue"
+constraintColor (_ :>: _) = "blue"
 
 genDOTFor' :: AnalysisConstraint r -> DOTM s [String]
 genDOTFor' c = withConstraintSides c $ \p ->

@@ -105,7 +105,7 @@ getUsedIds_constraint :: AnalysisConstraint r -> Writer UsedIds ()
 getUsedIds_constraint ct =
   case ct of
     x :=: y -> goE x >> goE y
-    x :<: y -> goE x >> goE y
+    x :>: y -> goE x >> goE y
   where
     goSF :: AnalysisSetFamily a -> Writer UsedIds ()
     goSF (C_Entry n) = tellNodeIds [n]
@@ -164,12 +164,14 @@ isNoSpecAttr _ = False
 handleDeclarator :: AnalysisCt r => CDeclarator NodeId -> ConstraintGen r ()
 handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
   | any isNoSpecAttr attrs = do
-      mapM_ (sameNode e) attrs
+      -- mapM_ (sameNode e) attrs
+      mapM_ (connect e) attrs
 
       tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Secret)))]
 
   | otherwise = do
-      mapM_ (sameNode e) attrs
+      -- mapM_ (sameNode e) attrs
+      mapM_ (connect e) attrs
       tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Public)))]
 
 handleDeclarator e = nop e
@@ -180,7 +182,11 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
     -- nop e
 
     -- sameNode e0 e
-    mapM_ (sameNode e) declSpec
+
+    mapM_ nop declSpec
+
+    -- mapM_ (sameNode e) declSpec
+    mapM_ (connect e) declSpec
 
     -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
 
@@ -192,7 +198,8 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
 
     mapM_ go xs
   where
-    go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
+    -- go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
+    go (Just declr, _, _) = nop declr *> connect e declr *> handleDeclarator declr
     go _ = pure ()
 -- handleCompoundItem (CBlockDecl {}) = pure ()
 handleCompoundItem (CBlockDecl e) = nop e
@@ -203,11 +210,19 @@ handleExpr :: AnalysisCt r => CExpression NodeId -> ConstraintGen r ()
 handleExpr e0@(CAssign _ cv@(CVar (Ident _ x _) _) e n) = do
   let m = annotation e
 
-  
+  e0 `connect` e
 
-  -- e0 `connect` e
-  tell [ SetFamily (C_Entry (annotation e)) :=: SetFamily (C_Entry (annotation e0)) ]
-  tell [ SetFamily (C_Entry (annotation cv)) :=: SetFamily (C_Entry (annotation e0)) ]
+  -- sameNode e e0
+  -- sameNode cv e0
+
+  -- connect e0 e
+  connect e0 cv
+
+  -- sameNode e0 e
+  -- sameNode e0 cv
+
+  -- tell [ SetFamily (C_Entry (annotation e)) :=: SetFamily (C_Entry (annotation e0)) ]
+  -- tell [ SetFamily (C_Entry (annotation cv)) :=: SetFamily (C_Entry (annotation e0)) ]
 
   tell [ (SetFamily (E_Family (annotation e0)) :=: Union (value (E_Family (annotation cv)))
                                                        (value (E_Family (annotation e)))) ]
@@ -230,7 +245,10 @@ handleExpr expr = do
 
   forM_ theChildren $ \c -> do
     -- tell [ c_entry (annotation c) :=: c_exit (annotation expr) ]
-    sameNode c expr
+
+    -- sameNode c expr
+    sameNode expr c
+
     tell [ (SetFamily (E_Family (annotation c)) :=: value (E_Family (annotation expr))) ]
     handleExpr c
   -- mapM_ handleExpr $ children expr
@@ -281,7 +299,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
     m = annotation t
 
 handleStmt e@(CCompound _ items _) = do
-  nop e
+  -- nop e
 
   case items of
     [] -> pure ()
@@ -323,11 +341,16 @@ connect x y =
 
 -- | Combine two nodes, to behave as one
 sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen r ()
-sameNode x y =
-  tell
-    [ SetFamily (C_Entry (annotation y)) :<: value (C_Entry (annotation x))
-    , SetFamily (C_Exit  (annotation y)) :<: value (C_Exit  (annotation x))
-    ]
+sameNode x y = do
+  return ()
+  -- nop y
+  -- x `connect` y
+
+  -- tell
+  --   [ SetFamily (C_Entry (annotation y)) :>: value (C_Entry (annotation x))
+  --   , SetFamily (C_Exit  (annotation y)) :>: value (C_Exit  (annotation x))
+  --   ]
+
   -- tell
   --   [ (SetFamily (C_Entry (annotation x)) :=: value (C_Entry (annotation y)))
   --   , (SetFamily (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y)))

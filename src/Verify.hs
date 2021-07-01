@@ -338,7 +338,7 @@ correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   solverPush
 
-  trackingAssert =<< consistentSensitivity n
+  trackingAssert =<< mkNot =<< consistentSensitivity n
 
   checkResult <- check
   result <- case checkResult of
@@ -626,18 +626,24 @@ instance ToZ3 (AnalysisConstraint Z3Var) where
     -- liftIO $ putStrLn "------------------"
     mkEq x' y'
 
-  toZ3 (x :<: y) = do
+  toZ3 (x :>: y) = do
     x' <- toZ3 x
     y' <- toZ3 y
     mkSetSubset x' y'
+
+generateDOT :: Bool
+generateDOT = True
 
 constraintsToZ3 :: Constraints Z3Var -> Z3Converter ()
 constraintsToZ3 cs = do
   forM cs
     (\c -> do
       ast <- toZ3 c
+
       astString <- astToString ast
-      -- liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
+      unless generateDOT
+        $ liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
+
       trackingAssert ast)
   return ()
 
@@ -733,6 +739,8 @@ main = do
           let tPairs = tNodesUsed used
               sPairs = sPairsUsed used
 
+          hPrint stderr parsed''
+
           -- print parsed''
 
           -- putStrLn $ "tNodes = " <> show tPairs
@@ -742,7 +750,7 @@ main = do
 
           -- putStrLn $ "nodeLocs = " <> show nodeLocs
 
-          putStrLn $ genDOT' constraints
+          when generateDOT $ putStrLn $ genDOT' constraints
 
           result  <- evalZ3Converter (Set.toList (varsUsed used))
                                                  (Set.toList theNodeIds)
