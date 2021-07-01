@@ -167,11 +167,16 @@ handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
       -- mapM_ (sameNode e) attrs
       mapM_ (connect e) attrs
 
+      mapM_ nop attrs
+
       tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Secret)))]
 
   | otherwise = do
       -- mapM_ (sameNode e) attrs
       mapM_ (connect e) attrs
+
+      mapM_ nop attrs
+
       tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Public)))]
 
 handleDeclarator e = nop e
@@ -183,7 +188,9 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
 
     -- sameNode e0 e
 
-    -- mapM_ nop declSpec
+    mapM_ nop declSpec
+
+    -- mapM _ declSpec
 
     -- mapM_ (sameNode e) declSpec
     mapM_ (connect e) declSpec
@@ -302,7 +309,7 @@ handleStmt e@(CCompound _ items _) = do
   -- nop e
 
   case items of
-    [] -> pure ()
+    [] -> nop e *> pure ()
     (firstItem:_) -> do --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
 
       tell [ SetFamily (C_Entry (annotation firstItem)) :=: SetFamily (C_Entry (annotation e)) ]

@@ -300,6 +300,7 @@ consistentSensitivity n = do
 
   -- c_exit_fn <- lookupZ3FuncDecl (C_Exit (error "consistentSensitivity: this should not be reached"))
   -- c_exit <- mkApp c_exit_fn [n]
+
   c_exit <- toZ3 (C_Exit n)
 
   varSens <- z3Info_varSensConstructor <$> ask
@@ -336,7 +337,9 @@ instance Monoid AnalysisResult where
 
 correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = do
-  -- fmap mconcat . forM nodeIds $ \n -> trackingAssert {- =<< mkNot -} =<< consistentSensitivity n
+  -- fmap mconcat . forM nodeIds $ \n -> trackingAssert =<< mkNot =<< consistentSensitivity n
+
+  trackingAssert =<< mkNot =<< mkAnd =<< mapM consistentSensitivity nodeIds
 
   checkResult <- check
   result <- case checkResult of
@@ -356,12 +359,13 @@ correctnessCondition nodeIds = do
 
                  -- trackingAssert =<< consistentSensitivity n
                  checkResult' <- check
-                 -- (_, modelM) <- getModel
-                 -- modelStr <- case modelM of
-                 --   Nothing -> return "<no model>"
-                 --   Just model -> showModel model
 
-                 error $ "<undef>: node: " -- ++ show n ++ "\n" ++ show checkResult'
+                 (_, modelM) <- getModel
+                 modelStr <- case modelM of
+                   Nothing -> return "<no model>"
+                   Just model -> showModel model
+
+                 error $ "<undef>: " ++ modelStr -- ++ show n ++ "\n" ++ show checkResult'
 
 --   solverPop 1
   return result
