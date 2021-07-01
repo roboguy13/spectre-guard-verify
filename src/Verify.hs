@@ -599,7 +599,7 @@ instance ToZ3 (Expr Z3Var Var SensExpr AnalysisSetFamily a) where
     compr <- mkConst compr_sym set_sort
 
     trackingAssert =<< mkForallConst [] [x_sym]
-      =<< 
+      =<<
         (mkImplies <$> (z3M mkAnd [mkSetMember x xs', pure pX'])
                <!> (mkSetMember fX' compr))
 
@@ -629,7 +629,7 @@ instance ToZ3 (AnalysisConstraint Z3Var) where
   toZ3 (x :>: y) = do
     x' <- toZ3 x
     y' <- toZ3 y
-    mkSetSubset x' y'
+    mkSetSubset y' x'
 
 generateDOT :: Bool
 generateDOT = True
@@ -641,8 +641,8 @@ constraintsToZ3 cs = do
       ast <- toZ3 c
 
       astString <- astToString ast
-      unless generateDOT
-        $ liftIO $ putStrLn $ "constraint: {\n" ++ astString  ++ "\n}"
+      -- unless generateDOT $
+      liftIO $ hPutStrLn stderr $ "constraint: {\n" ++ astString  ++ "\n}"
 
       trackingAssert ast)
   return ()

@@ -179,7 +179,7 @@ handleDeclarator e = nop e
 handleCompoundItem :: AnalysisCt r => CCompoundBlockItem NodeId -> ConstraintGen r ()
 handleCompoundItem e@(CBlockDecl (CDecl _ [] _)) = nop e
 handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
-    -- nop e
+    nop e
 
     -- sameNode e0 e
 
@@ -303,8 +303,10 @@ handleStmt e@(CCompound _ items _) = do
 
   case items of
     [] -> pure ()
-    (firstItem:_) -> --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
+    (firstItem:_) -> do --tell [ c_entry (annotation firstItem) :=: c_exit (annotation e) ]
       e `connect` firstItem
+      -- tell [ SetFamily (C_Exit (annotation e)) :=: SetFamily (C_Exit (annotation (last items))) ]
+      tell [ SetFamily (C_Exit (annotation (last items))) :>: SetFamily (C_Exit (annotation e)) ]
 
   connectList items
   mapM_ handleCompoundItem items
