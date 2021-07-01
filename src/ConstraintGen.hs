@@ -183,7 +183,7 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
 
     -- sameNode e0 e
 
-    mapM_ nop declSpec
+    -- mapM_ nop declSpec
 
     -- mapM_ (sameNode e) declSpec
     mapM_ (connect e) declSpec
@@ -199,7 +199,7 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
     mapM_ go xs
   where
     -- go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
-    go (Just declr, _, _) = nop declr *> connect e declr *> handleDeclarator declr
+    go (Just declr, _, _) = {- nop declr *> -} connect e declr *> handleDeclarator declr
     go _ = pure ()
 -- handleCompoundItem (CBlockDecl {}) = pure ()
 handleCompoundItem (CBlockDecl e) = nop e
