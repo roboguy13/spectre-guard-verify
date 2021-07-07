@@ -162,29 +162,25 @@ isNoSpecAttr (CAttr (Ident "nospec" _ _) _ _) = True
 isNoSpecAttr _ = False
 
 handleDeclarator :: AnalysisCt r => CDeclarator NodeId -> ConstraintGen r ()
-handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n)
-  | any isNoSpecAttr attrs = do
-      -- mapM_ (sameNode e) attrs
-      mapM_ (connect e) attrs
+handleDeclarator e@(CDeclr (Just (Ident ident hash _)) _derivs _strLit attrs n) = do
+  let sens =
+        if any isNoSpecAttr attrs
+          then Secret
+          else Public
 
-      mapM_ nop attrs
+  mapM_ (sameNode e) attrs
+  -- mapM_ (connect e) attrs
 
-      tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Secret)))]
+  -- mapM_ nop attrs
 
-  | otherwise = do
-      -- mapM_ (sameNode e) attrs
-      mapM_ (connect e) attrs
-
-      mapM_ nop attrs
-
-      tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom Public)))]
+  tell [(SetFamily (C_Exit n) :=: UnionSingle (SetFamily (C_Entry n)) (uncurry Pair (value $ Var hash, value $ SensAtom sens)))]
 
 handleDeclarator e = nop e
 
 handleCompoundItem :: AnalysisCt r => CCompoundBlockItem NodeId -> ConstraintGen r ()
 handleCompoundItem e@(CBlockDecl (CDecl _ [] _)) = nop e
 handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
-    nop e
+    -- nop e
 
     -- sameNode e0 e
 
@@ -193,7 +189,15 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
     -- mapM _ declSpec
 
     -- mapM_ (sameNode e) declSpec
-    mapM_ (connect e) declSpec
+    -- mapM_ (connect e) declSpec
+
+
+    let declSpecAnns = map annotation declSpec
+
+    forM_ declSpecAnns $ \ dAnn ->
+      tell [ SetFamily (C_Entry dAnn) :=: SetFamily (C_Entry (annotation e)) ]
+
+    -- tell [ SetFamily (C_Exit (annotation e)) :=: foldr1 Union (map (SetFamily . C_Exit) declSpecAnns) ]
 
     -- mapM_ (sameNode e) $ catMaybes $ map (\(z, _, _) -> z) xs
 
@@ -206,7 +210,7 @@ handleCompoundItem e@(CBlockDecl (CDecl declSpec xs _)) = do
     mapM_ go xs
   where
     -- go (Just declr, _, _) = sameNode e declr *> handleDeclarator declr
-    go (Just declr, _, _) = {- nop declr *> -} connect e declr *> handleDeclarator declr
+    go (Just declr, _, _) = {- nop declr *> -} sameNode e declr *> {- connect e declr *> -} handleDeclarator declr
     go _ = pure ()
 -- handleCompoundItem (CBlockDecl {}) = pure ()
 handleCompoundItem (CBlockDecl e) = nop e
@@ -316,6 +320,8 @@ handleStmt e@(CCompound _ items _) = do
 
       -- e `connect` firstItem
 
+      -- tell [ SetFamily (C_Exit (annotation e)) :>: SetFamily (C_Entry (annotation e)) ]
+
       tell [ SetFamily (C_Exit (annotation e)) :=: SetFamily (C_Exit (annotation (last items))) ]
       -- tell [ SetFamily (C_Exit (annotation (last items))) :>: SetFamily (C_Exit (annotation e)) ]
 
@@ -355,7 +361,7 @@ connect x y =
 -- | Combine two nodes, to behave as one
 sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen r ()
 sameNode x y = do
-  return ()
+  -- return ()
   -- nop y
   -- x `connect` y
 
@@ -364,10 +370,11 @@ sameNode x y = do
   --   , SetFamily (C_Exit  (annotation y)) :>: value (C_Exit  (annotation x))
   --   ]
 
-  -- tell
-  --   [ (SetFamily (C_Entry (annotation x)) :=: value (C_Entry (annotation y)))
-  --   , (SetFamily (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y)))
-  --   ]
+  tell
+    [ (SetFamily (C_Entry (annotation x)) :=: value (C_Entry (annotation y)))
+    , (SetFamily (C_Exit  (annotation x)) :=: value (C_Exit  (annotation y)))
+    -- , (SetFamily (C_Exit  (annotation x)) :>: value (C_Exit  (annotation y)))
+    ]
 
 -- TODO: Connect to following nodes
 handleFunDef :: AnalysisCt r => CFunctionDef NodeId -> ConstraintGen r ()

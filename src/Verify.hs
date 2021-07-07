@@ -69,6 +69,9 @@ import           Pattern
 import           ConstraintGen
 import           DOT
 
+generateDOT :: Bool
+generateDOT = True
+
 -- data Z3Var a = Z3Var { getZ3Var :: AST }
 
 infixl 4 <!>
@@ -185,12 +188,12 @@ defineZ3Names vars nodeIds = do
     do
       xs <- mkFreshVar "xs" sens_set_sort
       xs_sym <- toApp xs
-      assert =<<
+      trackingAssert =<<
         mkForallConst [] [xs_sym]
           =<< (mkIte <$> (mkSetMember secret xs)
                      <*> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure secret)
                      <!> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure public))
-      assert =<< (mkEq <$> (z3M (mkApp sens_setJoin) [mkEmptySet sens_sort]) <!> pure public)
+      trackingAssert =<< (mkEq <$> (z3M (mkApp sens_setJoin) [mkEmptySet sens_sort]) <!> pure public)
 
 
     bool_sort <- mkBoolSort
@@ -308,18 +311,18 @@ consistentSensitivity n = do
   public <- toZ3 Public
   secret <- toZ3 Secret
 
-  -- mkForallConst [] [v_sym] =<<
-  --   z3M mkAnd
-  --     [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
-  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
-  --
-  --     , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
-  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
-  --     ]
+  mkForallConst [] [v_sym] =<<
+    z3M mkAnd
+      [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
+                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
 
-  mkForallConst [] [v_sym, s_sym, s2_sym]
-    =<< (mkImplies <$> (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit])
-                   <!> (mkEq s s2))
+      , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
+                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
+      ]
+
+  -- mkForallConst [] [v_sym, s_sym, s2_sym]
+  --   =<< (mkImplies <$> (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit])
+  --                  <!> (mkEq s s2))
 
 data AnalysisResult = Correct | Incorrect String
   deriving (Show)
@@ -336,14 +339,29 @@ instance Monoid AnalysisResult where
   mempty = Correct
 
 correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
-correctnessCondition nodeIds = do
+correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   -- fmap mconcat . forM nodeIds $ \n -> trackingAssert =<< mkNot =<< consistentSensitivity n
 
-  trackingAssert =<< mkNot =<< mkAnd =<< mapM consistentSensitivity nodeIds
+  -- assert =<< mkAnd =<< mapM consistentSensitivity nodeIds
+
+  -- solverPush
+  liftIO $ hPutStrLn stderr $ "checking node " ++ show n ++ "..."
+
+  vsSort <- lookupZ3Sort VarSens_Sort
+
+  -- ast <- consistentSensitivity n
+
+  ast <- mkTrue --(mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
+  astStr <- astToString ast
+
+  liftIO $ hPutStrLn stderr $ unlines $ map ('\t':) $ lines astStr
+
+  -- assert ast
 
   checkResult <- check
   result <- case checkResult of
                Sat -> do
+                 liftIO $ hPutStrLn stderr "*** SAT ***"
                  (_, modelM) <- getModel
                  case modelM of
                    Nothing -> return $ Incorrect "<no model>"
@@ -352,7 +370,7 @@ correctnessCondition nodeIds = do
                      return $ Incorrect modelStr
                Unsat -> do
                  coreStr <- unlines <$> (mapM astToString =<< getUnsatCore)
-                 liftIO $ hPutStrLn stderr $ "core: " ++ coreStr
+                 liftIO $ hPutStrLn stderr $ "unsat core: " ++ coreStr
                  return Correct
                Undef -> do
                  -- solverPop 1
@@ -365,9 +383,12 @@ correctnessCondition nodeIds = do
                    Nothing -> return "<no model>"
                    Just model -> showModel model
 
-                 error $ "<undef>: " ++ modelStr -- ++ show n ++ "\n" ++ show checkResult'
+                 error $ "<undef>: " ++ show n ++ "\n" ++ show checkResult'
+                 -- error $ "<undef>: " ++ modelStr -- ++ show n ++ "\n" ++ show checkResult'
 
---   solverPop 1
+  liftIO $ hPutStrLn stderr "check done.\n\n"
+
+  -- solverPop 1
   return result
 
 -- evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
@@ -632,9 +653,6 @@ instance ToZ3 (AnalysisConstraint Z3Var) where
     x' <- toZ3 x
     y' <- toZ3 y
     mkSetSubset y' x'
-
-generateDOT :: Bool
-generateDOT = True
 
 constraintsToZ3 :: Constraints Z3Var -> Z3Converter ()
 constraintsToZ3 cs = do

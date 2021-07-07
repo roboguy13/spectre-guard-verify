@@ -284,17 +284,28 @@ genDOTFor' c = withConstraintSides c $ \p ->
   case p of
     (SetFamily (C_Entry n), Empty) -> genEmpty n entry
     (SetFamily (C_Exit n), Empty) -> genEmpty n exit
-    (SetFamily (C_Entry n), y) -> do
+    (SetFamily (C_Entry n), y@(SetFamily (C_Exit _))) -> do
       entryEq <- entryEquiv
       nDesc <- liftSTT $ classDesc entryEq n
 
       genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
+    (SetFamily (C_Exit n), y@(SetFamily (C_Entry _))) -> do
+      entryEq <- entryEquiv
+      nDesc <- liftSTT $ classDesc entryEq n
+
+      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
+    (SetFamily (C_Entry n), y) -> do
+      entryEq <- entryEquiv
+      nDesc <- liftSTT $ classDesc entryEq n
+
+      -- genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
+      genConnections (flip (dotConnectWithColor "green")) (nodeClassName entry nDesc) y
 
     (SetFamily (C_Exit n), y) -> do
       exitEq <- exitEquiv
       nDesc <- liftSTT $ classDesc exitEq n
 
-      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName exit nDesc) y
+      genConnections (flip (dotConnectWithColor "green")) (nodeClassName exit nDesc) y
     (SetFamily (E_Family {}), _) -> return []
     (SetFamily (S_Family {}), _) -> return []
     (_, _) -> return []
