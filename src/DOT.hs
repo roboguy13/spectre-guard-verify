@@ -289,11 +289,13 @@ genDOTFor' c = withConstraintSides c $ \p ->
       nDesc <- liftSTT $ classDesc entryEq n
 
       genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
-    (SetFamily (C_Exit n), y@(SetFamily (C_Entry _))) -> do
-      entryEq <- entryEquiv
-      nDesc <- liftSTT $ classDesc entryEq n
 
-      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName entry nDesc) y
+    (SetFamily (C_Exit n), y@(SetFamily (C_Entry _))) -> do
+      exitEq <- exitEquiv
+      nDesc <- liftSTT $ classDesc exitEq n
+
+      genConnections (flip (dotConnectWithColor (constraintColor c))) (nodeClassName exit nDesc) y
+
     (SetFamily (C_Entry n), y) -> do
       entryEq <- entryEquiv
       nDesc <- liftSTT $ classDesc entryEq n

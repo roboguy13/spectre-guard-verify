@@ -356,7 +356,7 @@ connectList (x:y:rest) = do
 connect :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen r ()
 connect x y =
   tell
-    [ (SetFamily (C_Entry (annotation y)) :=: value (C_Exit (annotation x))) ]
+    [ (SetFamily (C_Entry (annotation y)) :>: value (C_Exit (annotation x))) ]
 
 -- | Combine two nodes, to behave as one
 sameNode :: (Annotated f, Annotated g) => f NodeId -> g NodeId -> ConstraintGen r ()
