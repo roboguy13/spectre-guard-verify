@@ -340,7 +340,8 @@ consistentSensitivity n = do
   --   =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
   --                  -- <!> (mkEq s s2))
 
--- data AnalysisResult = Correct | Incorrect [(NodeId, Model, String)]
+-- TODO: Instead of keeping track of each entire model, could just keep
+-- track of the variable sensitivity mismatch info
 newtype AnalysisResult = MkAnalysisResult (Maybe [(NodeId, Maybe Model, String)])
   deriving Semigroup via Maybe [(NodeId, Maybe Model, String)]
   deriving Monoid via Maybe [(NodeId, Maybe Model, String)]
