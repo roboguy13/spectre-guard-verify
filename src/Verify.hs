@@ -352,6 +352,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   -- ast <- consistentSensitivity n
 
   ast <- mkNot =<< (mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
+  assert ast
   astStr <- astToString ast
 
   liftIO $ hPutStrLn stderr $ unlines $ map ('\t':) $ lines astStr
