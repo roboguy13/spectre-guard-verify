@@ -342,12 +342,15 @@ consistentSensitivity n = do
 
 -- TODO: Instead of keeping track of each entire model, could just keep
 -- track of the variable sensitivity mismatch info
-newtype AnalysisResult = MkAnalysisResult (Maybe [(NodeId, Maybe Model, String)])
-  deriving Semigroup via Maybe [(NodeId, Maybe Model, String)]
-  deriving Monoid via Maybe [(NodeId, Maybe Model, String)]
+data AnalysisResult = Correct | Incorrect [(NodeId, Maybe Model, String)]
 
-pattern Correct = MkAnalysisResult Nothing
-pattern Incorrect x = MkAnalysisResult (Just x)
+instance Semigroup AnalysisResult where
+  Incorrect errs <> _ = Incorrect errs
+  _ <> Incorrect errs = Incorrect errs
+  _ <> _ = Correct
+
+instance Monoid AnalysisResult where
+  mempty = Correct
 
 showResult :: AnalysisResult -> String
 showResult Correct = "Correct"
@@ -380,7 +383,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   vsSort <- lookupZ3Sort VarSens_Sort
 
   -- ast <- mkFalse
-  ast <- mkNot =<< consistentSensitivity n
+  ast <- consistentSensitivity n
   -- ast <- mkNot =<< (mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
 
   assert ast
