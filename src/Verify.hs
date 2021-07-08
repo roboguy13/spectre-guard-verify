@@ -21,6 +21,9 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {-# LANGUAGE QuantifiedConstraints #-}
 
@@ -323,33 +326,46 @@ consistentSensitivity n = do
   public <- toZ3 Public
   secret <- toZ3 Secret
 
-  -- mkForallConst [] [v_sym] =<<
-  --   z3M mkAnd
-  --     [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
-  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
+  mkForallConst [] [v_sym] =<<
+    z3M mkAnd
+      [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
+                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
 
-  --     , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
-  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
-  --     ]
+      , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
+                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
+      ]
 
-  -- mkForallConst [] [v_sym, s_sym, s2_sym]
-  mkExistsConst [] [v_sym, s_sym, s2_sym]
-    =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
-                   -- <!> (mkEq s s2))
+  -- -- mkForallConst [] [v_sym, s_sym, s2_sym]
+  -- mkExistsConst [] [v_sym, s_sym, s2_sym]
+  --   =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
+  --                  -- <!> (mkEq s s2))
 
-data AnalysisResult = Correct | Incorrect String
-  deriving (Show)
+-- data AnalysisResult = Correct | Incorrect [(NodeId, Model, String)]
+newtype AnalysisResult = MkAnalysisResult (Maybe [(NodeId, Maybe Model, String)])
+  deriving Semigroup via Maybe [(NodeId, Maybe Model, String)]
+  deriving Monoid via Maybe [(NodeId, Maybe Model, String)]
+
+pattern Correct = MkAnalysisResult Nothing
+pattern Incorrect x = MkAnalysisResult (Just x)
+
+showResult :: AnalysisResult -> String
+showResult Correct = "Correct"
+showResult (Incorrect errs) =
+  "Incorrect:"
+    <> unlines (map go errs)
+  where
+    go (n, _, str) = "  - At node " <> show n <> ":\n" <> str <> "\n"
 
 -- instance Show Model where
 --   show = _ . showModel
 
-instance Semigroup AnalysisResult where
-  Incorrect x <> _ = Incorrect x
-  _ <> Incorrect y = Incorrect y
-  Correct <> Correct = Correct
+-- instance Semigroup AnalysisResult where
+--   Incorrect x <> Incorrect y = Incorrect x
+--   _ <> Incorrect y = Incorrect y
+--   Correct <> Correct = Correct
 
-instance Monoid AnalysisResult where
-  mempty = Correct
+-- instance Monoid AnalysisResult where
+--   mempty = Correct
 
 correctnessCondition :: [NodeId] -> Z3Converter AnalysisResult
 correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
@@ -379,11 +395,11 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
                  liftIO $ hPutStrLn stderr "*** SAT ***"
                  (_, modelM) <- getModel
                  case modelM of
-                   Nothing -> return $ Incorrect "<no model>"
+                   Nothing -> return $ Incorrect [(n, Nothing, "<no model>")]
                    Just model -> do
                      modelStr <- showModel model
-                     error $ "Incorrect:\n" ++ modelStr
-                     return $ Incorrect modelStr
+                     -- error $ "Incorrect:\n" ++ modelStr
+                     return $ Incorrect [(n, Just model, modelStr)]
                Unsat -> do
                  coreStr <- unlines <$> (mapM astToString =<< getUnsatCore)
                  liftIO $ hPutStrLn stderr $ "unsat core: " ++ coreStr
@@ -454,13 +470,13 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   --     -- liftIO $ hPutStrLn stderr str
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
-    -- mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
+    mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
     -- mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
 
-    -- mapM makeT tNodes
+    mapM makeT tNodes
 
-    -- mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
-    -- conv
+    mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
+    conv
     correctnessCondition nodeIds
 
   -- str <- solverToString
@@ -830,7 +846,8 @@ main = do
 
           return ()
 
-          hPrint stderr result
+          -- hPrint stderr result
+          hPutStrLn stderr (showResult result)
 
           -- -- print r
 
