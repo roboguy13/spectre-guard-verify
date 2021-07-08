@@ -112,6 +112,8 @@ data Z3Info =
   , z3Info_varSens_varProj :: FuncDecl
   , z3Info_varSens_sensProj :: FuncDecl
   , z3Info_sens_setJoin :: FuncDecl
+  , z3Info_sens_join :: FuncDecl
+  , z3Info_sens_le :: FuncDecl
   }
 
 newtype Z3Converter a = Z3Converter { getZ3Converter :: ReaderT Z3Info (StateT Int Z3) a }
@@ -180,23 +182,31 @@ defineZ3Names vars nodeIds = do
     assert =<< (mkEq <$> (mkApp sens_join [public, secret]) <!> pure secret)
     assert =<< (mkEq <$> (mkApp sens_join [secret, secret]) <!> pure secret)
 
+    bool_sort <- mkBoolSort
+
+    sens_le_sym <- mkStringSymbol "sens_le"
+    sens_le <- mkFuncDecl sens_le_sym [sens_sort, sens_sort] bool_sort
+    assert =<< mkApp sens_le [public, public]
+    assert =<< mkApp sens_le [secret, secret]
+    assert =<< mkApp sens_le [secret, public]
+    assert =<< mkNot =<< mkApp sens_le [public, secret]
+
     sens_set_sort <- mkSetSort sens_sort
 
     sens_setJoin_sym <- mkStringSymbol "sens_setJoin"
     sens_setJoin <- mkFuncDecl sens_setJoin_sym [sens_set_sort] sens_sort
 
-    do
-      xs <- mkFreshVar "xs" sens_set_sort
-      xs_sym <- toApp xs
-      trackingAssert =<<
-        mkForallConst [] [xs_sym]
-          =<< (mkIte <$> (mkSetMember secret xs)
-                     <*> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure secret)
-                     <!> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure public))
-      trackingAssert =<< (mkEq <$> (z3M (mkApp sens_setJoin) [mkEmptySet sens_sort]) <!> pure public)
+    -- do
+    --   xs <- mkFreshVar "xs" sens_set_sort
+    --   xs_sym <- toApp xs
+    --   trackingAssert =<<
+    --     mkForallConst [] [xs_sym]
+    --       =<< (mkIte <$> (mkSetMember secret xs)
+    --                  <*> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure secret)
+    --                  <!> (mkEq <$> (mkApp sens_setJoin [xs]) <!> pure public))
+    --   trackingAssert =<< (mkEq <$> (z3M (mkApp sens_setJoin) [mkEmptySet sens_sort]) <!> pure public)
 
 
-    bool_sort <- mkBoolSort
 
     let buildFn sorts resultSort = mapM (\n -> mkFuncDecl n sorts resultSort)
 
@@ -248,23 +258,25 @@ defineZ3Names vars nodeIds = do
        , z3Info_varSens_varProj = varSens_var
        , z3Info_varSens_sensProj = varSens_sens
        , z3Info_sens_setJoin = sens_setJoin
+       , z3Info_sens_join = sens_join
+       , z3Info_sens_le = sens_le
        }
 
-tDef :: NodeId -> AnalysisConstraint Z3Var
-tDef n =
-  MonoidVal (SensT n) :=: rhs
-  where
-    rhs :: AnalysisExpr Z3Var SensExpr
-    rhs =
-      Lub (SetCompr
-              Snd
-              -- varSens_sensProj
+-- tDef :: NodeId -> AnalysisConstraint Z3Var
+-- tDef n =
+--   MonoidVal (SensT n) :=: rhs
+--   where
+--     rhs :: AnalysisExpr Z3Var SensExpr
+--     rhs =
+--       Lub (SetCompr
+--               Snd
+--               -- varSens_sensProj
 
-              (\vs -> Fst vs
-                       `In`
-                      value (E_Family n))
+--               (\vs -> Fst vs
+--                        `In`
+--                       value (E_Family n))
 
-              (SetFamily (C_Entry n)))
+--               (SetFamily (C_Entry n)))
 
 bDef :: NodeId -> AnalysisConstraint Z3Var
 bDef n =
@@ -311,18 +323,19 @@ consistentSensitivity n = do
   public <- toZ3 Public
   secret <- toZ3 Secret
 
-  mkForallConst [] [v_sym] =<<
-    z3M mkAnd
-      [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
-                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
+  -- mkForallConst [] [v_sym] =<<
+  --   z3M mkAnd
+  --     [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
 
-      , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
-                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
-      ]
+  --     , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
+  --     ]
 
   -- mkForallConst [] [v_sym, s_sym, s2_sym]
-  --   =<< (mkImplies <$> (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit])
-  --                  <!> (mkEq s s2))
+  mkExistsConst [] [v_sym, s_sym, s2_sym]
+    =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
+                   -- <!> (mkEq s s2))
 
 data AnalysisResult = Correct | Incorrect String
   deriving (Show)
@@ -344,14 +357,15 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
 
   -- assert =<< mkAnd =<< mapM consistentSensitivity nodeIds
 
-  -- solverPush
+  solverPush
   liftIO $ hPutStrLn stderr $ "checking node " ++ show n ++ "..."
 
   vsSort <- lookupZ3Sort VarSens_Sort
 
-  -- ast <- consistentSensitivity n
+  -- ast <- mkFalse
+  ast <- mkNot =<< consistentSensitivity n
+  -- ast <- mkNot =<< (mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
 
-  ast <- mkNot =<< (mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
   assert ast
   astStr <- astToString ast
 
@@ -368,6 +382,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
                    Nothing -> return $ Incorrect "<no model>"
                    Just model -> do
                      modelStr <- showModel model
+                     error $ "Incorrect:\n" ++ modelStr
                      return $ Incorrect modelStr
                Unsat -> do
                  coreStr <- unlines <$> (mapM astToString =<< getUnsatCore)
@@ -384,13 +399,43 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
                    Nothing -> return "<no model>"
                    Just model -> showModel model
 
-                 error $ "<undef>: " ++ show n ++ "\n" ++ show checkResult'
-                 -- error $ "<undef>: " ++ modelStr -- ++ show n ++ "\n" ++ show checkResult'
+                 -- error $ "<undef>: " ++ show n ++ "\n" ++ show checkResult'
+                 error $ "<undef>: " ++ modelStr -- ++ show n ++ "\n" ++ show checkResult'
 
   liftIO $ hPutStrLn stderr "check done.\n\n"
 
-  -- solverPop 1
+  solverPop 1
   return result
+
+makeT :: NodeId -> Z3Converter ()
+makeT n = do
+  -- sens's <- toZ3 (SetCompr Snd (\_ -> BoolVal True) (SetFamily (C_Entry n)) :: AnalysisExpr Z3Var (SetE SensExpr))
+  -- contained <- toZ3 (MonoidVal (SensT n) `In` SetCompr Snd (\_ -> BoolVal True) (SetFamily (C_Entry n)) :: AnalysisExpr Z3Var Bool)
+
+  tFn' <- lookupZ3FuncDecl (SensT n)
+  tFn <- mkApp tFn' . (:[]) =<< toZ3 n
+
+  c_entry <- toZ3 (SetFamily (C_Entry n) :: AnalysisExpr Z3Var (SetE (Var, SensExpr)))
+  -- c_entry' <- lookupZ3FuncDecl (C_Entry n)
+
+  (_, v_sym, v) <- mkSymVar "v" Var_Sort
+
+  varSens <- z3Info_varSensConstructor <$> ask
+
+  contained <-
+    mkExistsConst [] [v_sym]
+      =<< mkSelect c_entry =<< (mkApp varSens [v, tFn])
+
+  sens_le <- z3Info_sens_le <$> ask
+  sensProj <- z3Info_varSens_sensProj <$> ask
+
+  -- (_, s_sym, s) <- mkSymVar "s" Sens_Sort
+  (_, vs_sym, vs) <- mkSymVar "vs" VarSens_Sort
+  least <-
+    mkForallConst [] [vs_sym]
+      =<< (mkImplies <$> (mkSetMember vs c_entry) <!> z3M (mkApp sens_le) [pure tFn, mkApp sensProj [vs]])
+
+  assert =<< mkAnd [contained, least]
 
 -- evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO (Result, Either [String] String)
 evalZ3Converter :: [Var] -> [NodeId] -> [(NodeId, NodeId)] -> [NodeId] -> Z3Converter () -> IO AnalysisResult
@@ -400,6 +445,7 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   -- paramsSetSymbol params <$> mkStringSymbol "trace" <!> mkStringSymbol "true"
   solverSetParams params
 
+  -- z3Info <- pure Z3Info {}
   z3Info <- defineZ3Names vars nodeIds
 
   -- case (generateS's sPairs, generateT's tNodes, correctnessCondition nodeIds) of
@@ -408,10 +454,13 @@ evalZ3Converter vars nodeIds sPairs tNodes conv = evalZ3 $ do
   --     -- liftIO $ hPutStrLn stderr str
 
   flip evalStateT 0 $ flip runReaderT z3Info $ getZ3Converter $ do
-    mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
-    mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
-    mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
-    conv
+    -- mapM_ (assert <=< toZ3 . uncurry sDef) sPairs
+    -- mapM_ (trackingAssert <=< toZ3 . tDef) tNodes
+
+    -- mapM makeT tNodes
+
+    -- mapM_ (trackingAssert <=< toZ3 . bDef) (map snd sPairs)
+    -- conv
     correctnessCondition nodeIds
 
   -- str <- solverToString
