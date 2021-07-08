@@ -326,27 +326,34 @@ consistentSensitivity n = do
   public <- toZ3 Public
   secret <- toZ3 Secret
 
-  mkForallConst [] [v_sym] =<<
-    z3M mkAnd
-      [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
-                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
+  -- mkForallConst [] [v_sym] =<<
+  --   z3M mkAnd
+  --     [ mkImplies <$> (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit))
 
-      , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
-                  <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
-      ]
+  --     , mkImplies <$> (mkSetMember <$> mkApp varSens [v, secret] <!> pure c_exit)
+  --                 <!> (mkNot =<< (mkSetMember <$> mkApp varSens [v, public] <!> pure c_exit))
+  --     ]
 
-  -- -- mkForallConst [] [v_sym, s_sym, s2_sym]
+
+  mkForallConst [] [v_sym, s_sym, s2_sym]
+    =<< (mkImplies <$> z3M mkAnd [mkSetMember <$> mkApp varSens [v, s ] <!> pure c_exit
+                                 ,mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit]
+                   <!> mkEq s s2)
   -- mkExistsConst [] [v_sym, s_sym, s2_sym]
-  --   =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
-  --                  -- <!> (mkEq s s2))
+    -- =<< (z3M mkAnd [mkSetMember <$> mkApp varSens [v, s] <!> pure c_exit, mkSetMember <$> mkApp varSens [v, s2] <!> pure c_exit, mkNot =<< mkEq s s2])
+                   -- <!> (mkEq s s2))
+
+
 
 -- TODO: Instead of keeping track of each entire model, could just keep
 -- track of the variable sensitivity mismatch info
 data AnalysisResult = Correct | Incorrect [(NodeId, Maybe Model, String)]
 
 instance Semigroup AnalysisResult where
-  Incorrect errs <> _ = Incorrect errs
-  _ <> Incorrect errs = Incorrect errs
+  Incorrect errsA <> Incorrect errsB = Incorrect (errsA <> errsB)
+  Incorrect errs <> Correct = Incorrect errs
+  Correct  <> Incorrect errs = Incorrect errs
   _ <> _ = Correct
 
 instance Monoid AnalysisResult where
@@ -383,7 +390,7 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
   vsSort <- lookupZ3Sort VarSens_Sort
 
   -- ast <- mkFalse
-  ast <- consistentSensitivity n
+  ast <- mkNot =<< consistentSensitivity n
   -- ast <- mkNot =<< (mkEq <$> toZ3 (C_Exit n) <!> mkEmptySet vsSort)
 
   assert ast
