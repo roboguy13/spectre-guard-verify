@@ -277,6 +277,7 @@ defineZ3Names vars nodeIds = do
        , z3Info_sens_le = sens_le
        }
 
+{-
 tDef :: NodeId -> AnalysisConstraint Z3Var
 tDef n =
   MonoidVal (SensT n) :=: rhs
@@ -292,6 +293,7 @@ tDef n =
                       value (E_Family n))
 
               (SetFamily (C_Entry n)))
+-}
 
 bDef :: NodeId -> AnalysisConstraint Z3Var
 bDef n =
@@ -457,6 +459,8 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
                      v_str <- modelString model v
                      s_str <- modelString model s
                      s2_str <- modelString model s2
+                     str <- modelString model =<< toZ3 (E_Family n)
+                     liftIO $ hPutStrLn stderr $ "\n" ++ str
                      liftIO $ hPutStrLn stderr $ "Incorrect:\n" ++ show n ++ "\n" ++ v_str ++ " " ++ s_str ++ " " ++ s2_str
                      error modelStr
                      -- return $ Incorrect [(n, Just model, modelStr)]
@@ -486,17 +490,38 @@ correctnessCondition nodeIds = fmap mconcat . forM nodeIds $ \n -> do
 makeT :: NodeId -> Z3Converter ()
 makeT n = do
   sensProj <- z3Info_varSens_sensProj <$> ask
+  varProj <- z3Info_varSens_varProj <$> ask
   (_, sens's_sym, sens's) <- mkSymVar "sens_s" SensSet_Sort
 
   (_, vs_sym, vs) <- mkSymVar "vs" VarSens_Sort
 
   c_entry_n <- toZ3 (C_Entry n)
+  e_n <- toZ3 (E_Family n)
 
   trackingAssert
     =<< mkForallConst [] [vs_sym]
-          =<< (mkImplies <$> (mkSelect c_entry_n vs)
+          =<< (mkImplies <$> (z3M mkAnd [mkSelect e_n =<< mkApp varProj [vs], mkSelect c_entry_n vs])
                          <!> (mkSelect sens's =<< mkApp sensProj [vs]))
 
+  (_, s_sym, s) <- mkSymVar "s" Sens_Sort
+  (_, v_sym, v) <- mkSymVar "v" Var_Sort
+
+  varSens <- z3Info_varSensConstructor <$> ask
+
+  (_, vs'_sym, vs') <- mkSymVar "vs'" VarSens_Sort
+
+  trackingAssert
+    =<< (mkForallConst [] [s_sym]
+           =<< (mkImplies <$> (mkSelect sens's s)
+                          <!> (z3M mkOr
+                                [mkExistsConst [] [v_sym] =<< z3M mkAnd
+                                                                [mkSelect e_n =<< mkApp varProj [vs']
+                                                                ,mkSelect c_entry_n =<< mkApp varSens [v, s]
+                                                                ]
+                                ,mkForallConst [] [vs'_sym] =<< mkNot =<< mkSelect e_n =<< mkApp varProj [vs']
+                                ])))
+
+  -- trackingAssert
 
   public <- toZ3 Public
   secret <- toZ3 Secret
@@ -504,9 +529,13 @@ makeT n = do
   t_n <- toZ3 (SensT n)
 
   trackingAssert
-    =<< (mkIte <$> (mkSelect sens's secret)
-               <*> (mkEq t_n secret)
-               <!> (mkEq t_n public))
+    =<< z3M mkAnd
+          [ mkImplies <$> mkSelect sens's secret <!> mkEq t_n secret
+          , mkImplies <$> (mkNot =<< mkSelect sens's secret) <!> mkEq t_n public
+          ]
+    -- =<< (mkIte <$> (mkSelect sens's secret)
+    --            <*> (mkEq t_n secret)
+    --            <!> (mkEq t_n public))
 
   -- -- sens's <- toZ3 (SetCompr Snd (\_ -> BoolVal True) (SetFamily (C_Entry n)) :: AnalysisExpr Z3Var (SetE SensExpr))
   -- -- contained <- toZ3 (MonoidVal (SensT n) `In` SetCompr Snd (\_ -> BoolVal True) (SetFamily (C_Entry n)) :: AnalysisExpr Z3Var Bool)
