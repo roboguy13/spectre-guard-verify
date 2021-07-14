@@ -36,6 +36,8 @@ import           Data.Type.Bool
 import           Data.Constraint
 import           Data.Semigroup
 
+import           Data.Set (Set)
+
 import           Ppr
 import           Pattern
 
@@ -49,7 +51,7 @@ class ElemVal r where
 --   elemRepr _ = elemRepr (Proxy @a)
 
 data Expr r base m f t where
-  SetFamily :: f a -> Expr r base m f (SetE a)
+  SetFamily :: f (Set a) -> Expr r base m f (Set a)
   BaseVal :: base -> Expr r base m f a
   MonoidVal :: m -> Expr r base m f m
   BoolVal :: Bool -> Expr r base m f Bool
@@ -60,19 +62,19 @@ data Expr r base m f t where
   Fst :: Expr r base m f (a, b) -> Expr r base m f a
   Snd :: Expr r base m f (a, b) -> Expr r base m f b
 
-  In :: Expr r base m f a -> Expr r base m f (SetE a) -> Expr r base m f Bool
+  In :: Expr r base m f a -> Expr r base m f (Set a) -> Expr r base m f Bool
   And :: Expr r base m f Bool -> Expr r base m f Bool -> Expr r base m f Bool
   BaseEqual :: Expr r base m f base -> Expr r base m f base -> Expr r base m f Bool
   MonoidEqual :: Expr r base m f m -> Expr r base m f m -> Expr r base m f Bool
   Ite :: Expr r base m f Bool -> Expr r base m f a -> Expr r base m f a -> Expr r base m f a
 
-  Union :: Expr r base m f (SetE a) -> Expr r base m f (SetE a) -> Expr r base m f (SetE a)
-  UnionSingle :: Expr r base m f (SetE a) -> Expr r base m f a -> Expr r base m f (SetE a)
-  Empty :: (ElemVal r, ElemRepr r a) => Expr r base m f (SetE a)
+  Union :: Expr r base m f (Set a) -> Expr r base m f (Set a) -> Expr r base m f (Set a)
+  UnionSingle :: Expr r base m f (Set a) -> Expr r base m f a -> Expr r base m f (Set a)
+  Empty :: (ElemVal r, ElemRepr r a) => Expr r base m f (Set a)
 
-  SetCompr :: (ElemVal r, ElemRepr r a, ElemRepr r b) => (forall r. Expr r base m f a -> Expr r base m f b) -> (forall r. Expr r base m f a -> Expr r base m f Bool) -> Expr r base m f (SetE a) -> Expr r base m f (SetE b)
+  SetCompr :: (ElemVal r, ElemRepr r a, ElemRepr r b) => (forall r. Expr r base m f a -> Expr r base m f b) -> (forall r. Expr r base m f a -> Expr r base m f Bool) -> Expr r base m f (Set a) -> Expr r base m f (Set b)
 
-  Lub :: Expr r base m f (SetE m) -> Expr r base m f m
+  Lub :: Expr r base m f (Set m) -> Expr r base m f m
 
 -- class ExprEq a
 
@@ -81,7 +83,7 @@ class Value e v where
 
 instance Value (Expr r base m f base) base where value = BaseVal
 instance Value (Expr r base m f m) m where value = MonoidVal
-instance Value (Expr r base m f (SetE a)) (f a) where value = SetFamily
+instance Value (Expr r base m f (Set a)) (f (Set a)) where value = SetFamily
 instance Value (Expr r base m f Bool) Bool where value = BoolVal
 instance (Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Expr r base m f (a, b)) (a, b) where
   value (x, y) = Pair (value x) (value y)
@@ -94,7 +96,7 @@ data ConstraintE r base m f where
   (:=:) :: Expr r base m f a -> Expr r base m f a -> ConstraintE r base m f
 
   -- | (Non-strict) subset relation constraint
-  (:>:) :: Expr r base m f (SetE a) -> Expr r base m f (SetE a) -> ConstraintE r base m f
+  (:>:) :: Expr r base m f (Set a) -> Expr r base m f (Set a) -> ConstraintE r base m f
 
 data ConstraintType = EqualityConstraint | SubsetConstraint
 

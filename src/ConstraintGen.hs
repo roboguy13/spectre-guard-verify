@@ -51,22 +51,23 @@ data SensExpr where
 
 -- | The set family for this analysis
 data AnalysisSetFamily a where
-  C_Entry :: NodeId -> AnalysisSetFamily (Var, SensExpr)
-  C_Exit :: NodeId -> AnalysisSetFamily (Var, SensExpr)
+  C_Entry :: NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
+  C_Exit :: NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
 
-  S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Var, SensExpr)
-  B_Family :: NodeId -> AnalysisSetFamily Var
-  E_Family :: NodeId -> AnalysisSetFamily Var
+  S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
+  B_Family :: NodeId -> AnalysisSetFamily (Set Var)
+  E_Family :: NodeId -> AnalysisSetFamily (Set Var)
 
 type AnalysisConstraint r = ConstraintE r Var SensExpr AnalysisSetFamily
 
 type Constraints r = [AnalysisConstraint r]
 
-type AnalysisExpr r a = Expr r Var SensExpr AnalysisSetFamily a
+type AnalysisExpr r = Expr r Var SensExpr AnalysisSetFamily
 
 data UsedIds =
   UsedIds
     { tNodesUsed :: Set NodeId
+    , eNodesUsed :: Set NodeId
     , sPairsUsed :: Set (NodeId, NodeId)
     , varsUsed :: Set Var
     , nodeIdsUsed :: Set NodeId
@@ -76,17 +77,23 @@ instance Semigroup UsedIds where
   x <> y =
     UsedIds
       { tNodesUsed  = tNodesUsed  x <> tNodesUsed  y
+      , eNodesUsed  = eNodesUsed  x <> eNodesUsed  y
       , sPairsUsed  = sPairsUsed  x <> sPairsUsed  y
       , varsUsed    = varsUsed    x <> varsUsed    y
       , nodeIdsUsed = nodeIdsUsed x <> nodeIdsUsed y
       }
 
 instance Monoid UsedIds where
-  mempty = UsedIds mempty mempty mempty mempty
+  mempty = UsedIds mempty mempty mempty mempty mempty
 
 tellTNodes :: Set NodeId -> Writer UsedIds ()
 tellTNodes ns = do
   tell mempty { tNodesUsed = ns }
+  tellNodeIds ns
+
+tellENodes :: Set NodeId -> Writer UsedIds ()
+tellENodes ns = do
+  tell mempty { eNodesUsed = ns }
   tellNodeIds ns
 
 tellSPairs :: Set (NodeId, NodeId) -> Writer UsedIds ()
@@ -112,7 +119,7 @@ getUsedIds_constraint ct =
     goSF (C_Exit n)  = tellNodeIds [n]
     goSF (S_Family m n) = tellSPairs [(m, n)]
     goSF (B_Family n) = tellNodeIds [n]
-    goSF (E_Family n) = tellNodeIds [n]
+    goSF (E_Family n) = tellENodes [n]
 
     goE :: AnalysisExpr r a -> Writer UsedIds ()
     goE (SetFamily sf) = goSF sf
