@@ -31,6 +31,7 @@ instance Eq a => Semigroup (Defined a) where
     | otherwise     = Inconsistent
   Known x <> _      = Known x
   _ <> Known y      = Known y
+  _ <> _            = Unknown
 
 instance Eq a => Monoid (Defined a) where
   mempty = Unknown
@@ -122,6 +123,9 @@ definedFunImage (MkDefinedFun f) = sequenceA . map f
 
 newtype IxedCell s a b = MkIxedCell { getIxedCell :: STRef s (DefinedFun a b, ST s ()) }
 
+ixedCell :: DefinedFun a b -> ST s (IxedCell s a b)
+ixedCell df = MkIxedCell <$> newSTRef (df, pure ())
+
 known :: a -> ST s (IxedCell s x a)
 known x = MkIxedCell <$> newSTRef (constDefinedFun (Known x), pure ())
 
@@ -184,7 +188,7 @@ type Cell s = IxedCell s ()
 readCell :: Cell s a -> ST s (Defined a)
 readCell c = readIxedCellAt c ()
 
-add :: (Eq a, Num a) => Cell s a -> Cell s a -> Cell s a -> ST s ()
+add :: (Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
 add cX cY cZ = do
     -- cX + cY = cZ
   binary (+) cX cY cZ
@@ -195,7 +199,7 @@ add cX cY cZ = do
     -- cZ - cX = cY
   binary (-) cZ cX cY
 
-negation :: (Eq a, Num a) => Cell s a -> Cell s a -> ST s ()
+negation :: (Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> ST s ()
 negation cX cY = do
   unary negate cX cY
   unary negate cY cX
@@ -218,4 +222,13 @@ example1 = do
 
   [a, b, c] <- mapM readCell [z, w, o]
   return (a, b, c)
+
+example2 :: forall s. ST s (Defined Int)
+example2 = do
+  x <- ixedCell (pointFun ('x', 1))
+  y <- ixedCell (pointFun ('y', 2))
+  z <- unknown
+
+  add x y z
+  readIxedCellAt x 'x'
 
