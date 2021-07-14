@@ -77,7 +77,7 @@ extendDefinedFun df p =
     Just df' -> df
     Nothing -> inconsistentDefinedFun
 
-definedFunImage :: (Eq b) => DefinedFun a b -> [a] -> Defined [b]
+definedFunImage :: DefinedFun a b -> [a] -> Defined [b]
 definedFunImage (MkDefinedFun f) = sequenceA . map f
 
 newtype Cell s a = MkCell { getCell :: STRef s (Defined a, ST s ()) }
