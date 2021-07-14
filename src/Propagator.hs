@@ -9,8 +9,11 @@
 
 module Propagator where
 
+import           Prelude hiding (id, (.))
 import           Data.STRef
 import           Control.Monad.ST
+import           Control.Category
+import           Control.Applicative
 
 -- TODO: Keep track of the origin of inconsistencies
 data Defined a
@@ -40,12 +43,48 @@ instance Applicative Defined where
   Unknown <*> _ = Unknown
   _ <*> Unknown = Unknown
 
+-- -- NOTE: 'ap' is different from (<*>) with this:
+-- instance Monad Defined where
+--   return = pure
+--   Inconsistent >>= _ = Inconsistent
+--   x >>= f = theJoin (fmap f x)
+--     where
+--       theJoin (Known (Known k)) = Known k
+--       theJoin Unknown = Unknown
+--       theJoin Inconsistent = Inconsistent
+
+applyToDefined :: (a -> b) -> Defined a -> Defined b
+applyToDefined = fmap
+
+applyToDefined2 :: (a -> b -> c) -> Defined a -> Defined b -> Defined c
+applyToDefined2 = liftA2
+
 -- | Indexed (partial function-like) version of @Defined@
 newtype DefinedFun a b = MkDefinedFun { runDefinedFun :: a -> Defined b }
 
 instance Eq b => Semigroup (DefinedFun a b) where
   MkDefinedFun f <> MkDefinedFun g =
     MkDefinedFun (f <> g)
+
+instance Eq b => Monoid (DefinedFun a b) where
+  mempty = constDefinedFun Unknown
+
+instance Category DefinedFun where
+  id = definedFun id
+  MkDefinedFun f . MkDefinedFun g = MkDefinedFun $ \x ->
+    case g x of
+      Known x' -> f x'
+      Unknown -> Unknown
+      Inconsistent -> Inconsistent
+
+definedFun :: (a -> b) -> DefinedFun a b
+definedFun f = MkDefinedFun (Known . f)
+
+pointFun :: Eq a => (a, b) -> DefinedFun a b
+pointFun (x, y) = MkDefinedFun $ \z ->
+  if z == x
+    then Known y
+    else Unknown
 
 fromUnitDefinedFun :: DefinedFun () a -> Defined a
 fromUnitDefinedFun (MkDefinedFun f) = f ()
@@ -63,10 +102,11 @@ inconsistentDefinedFun = constDefinedFun Inconsistent
 extendDefinedFun' :: (Eq a, Eq b) => DefinedFun a b -> (a, b) -> Maybe (DefinedFun a b)
 extendDefinedFun' df@(MkDefinedFun f) (x, y) =
   case f x of
-    Unknown -> Just . MkDefinedFun $ \z ->
-      if z == x
-        then Known y
-        else f z
+    Unknown -> Just (pointFun (x, y) <> df)
+    -- Unknown -> Just . MkDefinedFun $ \z ->
+    --   if z == x
+    --     then Known y
+    --     else f z
     Known y'
       | y' == y -> Just df
     _ -> Nothing
@@ -80,70 +120,69 @@ extendDefinedFun df p =
 definedFunImage :: DefinedFun a b -> [a] -> Defined [b]
 definedFunImage (MkDefinedFun f) = sequenceA . map f
 
-newtype Cell s a = MkCell { getCell :: STRef s (Defined a, ST s ()) }
+newtype IxedCell s a b = MkIxedCell { getIxedCell :: STRef s (DefinedFun a b, ST s ()) }
 
-known :: a -> ST s (Cell s a)
-known x = MkCell <$> newSTRef (Known x, pure ())
+known :: a -> ST s (IxedCell s x a)
+known x = MkIxedCell <$> newSTRef (constDefinedFun (Known x), pure ())
 
-unknown :: ST s (Cell s a)
-unknown = MkCell <$> newSTRef (Unknown, pure ())
+unknown :: ST s (IxedCell s x a)
+unknown = MkIxedCell <$> newSTRef (constDefinedFun Unknown, pure ())
 
-readCell :: Cell s a -> ST s (Defined a)
-readCell (MkCell ref) = do
+readIxedCell :: IxedCell s x a -> ST s (DefinedFun x a)
+readIxedCell (MkIxedCell ref) = do
   (x, _) <- readSTRef ref
   return x
 
-updateDefined :: Eq a => Cell s a -> Defined a -> ST s ()
-updateDefined (MkCell c) x = do
+readIxedCellAt :: IxedCell s x a -> x -> ST s (Defined a)
+readIxedCellAt c x = (`runDefinedFun` x) <$> readIxedCell c
+
+ixedCellImage :: IxedCell s x a -> [x] -> ST s (Defined [a])
+ixedCellImage c xs = fmap sequenceA (mapM (flip runDefinedFun) xs <$> readIxedCell c)
+
+updateDefined :: Eq a => IxedCell s x a -> DefinedFun x a -> ST s ()
+updateDefined (MkIxedCell c) x = do
     (_, act) <- readSTRef c
     modifySTRef c go
     -- act
   where
     go (def, act) = (def <> x, act)
 
-update :: Eq a => Cell s a -> a -> ST s ()
-update c = updateDefined c . Known
+update :: (Eq x, Eq a) => IxedCell s x a -> (x, a) -> ST s ()
+update c (x, y) = updateDefined c (MkDefinedFun f)
+  where
+    f z
+      | z == x    = Known y
+      | otherwise = Unknown
 
-watch :: Cell s a -> (a -> ST s ()) -> ST s ()
-watch c@(MkCell ref) k = do
+watch :: IxedCell s x a -> (DefinedFun x a -> ST s ()) -> ST s ()
+watch c@(MkIxedCell ref) k = do
   modifySTRef ref go
   (_, act) <- readSTRef ref
   act
   where
     prop = do
-      (def, act) <- readSTRef ref
-      case def of
-        Known x -> k x
-        _ -> pure ()
+      (fun, act) <- readSTRef ref
+      k fun
     go (def, act) = (def, act *> prop)
 
--- link :: Eq a => Cell s a -> Cell s a -> ST s ()
--- link xC@(MkCell x) yC@(MkCell y) = do
---   (xVal, actX) <- readSTRef x
---   (yVal, actY) <- readSTRef y
---   modifySTRef x (go yC yVal actY)
---   actX
---   modifySTRef y (go xC xVal actX)
---   actY
---   where
---     go c val otherAct (def, act) =
---       (def <> val, otherAct <> updateDefined c def <> act)
-
-unary :: (Eq a, Eq b) => (a -> b) -> Cell s a -> Cell s b -> ST s ()
+unary :: (Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
 unary f cX cY = do
-  watch cX (update cY . f)
+  watch cX (updateDefined cY . (definedFun f .))
 
-binary :: (Eq a, Eq b, Eq c) => (a -> b -> c) -> Cell s a -> Cell s b -> Cell s c -> ST s ()
-binary f cX cY cZ = do
-  watch cX $ \x -> do
-    readCell cY >>= \case
-      Known y -> update cZ (f x y)
-      _ -> pure ()
+binary :: (Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binary f cA cB cC = do
+  watch cA $ \g -> do
+    readIxedCell cB >>= \h ->
+      updateDefined cC (MkDefinedFun (liftA2 f <$> runDefinedFun g <*> runDefinedFun h))
 
-  watch cY $ \y -> do
-    readCell cX >>= \case
-      Known x -> update cZ (f x y)
-      _ -> pure ()
+  watch cB $ \g -> do
+    readIxedCell cA >>= \h ->
+      updateDefined cC (MkDefinedFun (liftA2 f <$> runDefinedFun h <*> runDefinedFun g))
+
+type Cell s = IxedCell s ()
+
+readCell :: Cell s a -> ST s (Defined a)
+readCell c = readIxedCellAt c ()
 
 add :: (Eq a, Num a) => Cell s a -> Cell s a -> Cell s a -> ST s ()
 add cX cY cZ = do
