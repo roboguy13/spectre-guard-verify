@@ -1,5 +1,4 @@
---
--- Based on Tom Harding's propagators: https://www.youtube.com/watch?v=qYmW4TSBnVI
+-- | Based on Tom Harding's propagators: https://www.youtube.com/watch?v=qYmW4TSBnVI
 --
 
 {-# LANGUAGE DeriveFunctor #-}
@@ -11,8 +10,7 @@ module Propagator where
 import           Data.STRef
 import           Control.Monad.ST
 
-
--- TODO: Allow for indexing (partial function-like values)
+-- TODO: Keep track of the origin of inconsistencies
 data Defined a
   = Unknown
   | Known a
@@ -32,6 +30,7 @@ instance Eq a => Semigroup (Defined a) where
 instance Eq a => Monoid (Defined a) where
   mempty = Unknown
 
+-- | Indexed (partial function-like) version of @Defined@
 newtype DefinedFun a b = MkDefinedFun { runDefinedFun :: a -> Defined b }
 
 instance Eq b => Semigroup (DefinedFun a b) where
@@ -40,6 +39,33 @@ instance Eq b => Semigroup (DefinedFun a b) where
 
 fromUnitDefinedFun :: DefinedFun () a -> Defined a
 fromUnitDefinedFun (MkDefinedFun f) = f ()
+
+toUnitDefinedFun :: Defined a -> DefinedFun () a
+toUnitDefinedFun = constDefinedFun
+
+constDefinedFun :: Defined b -> DefinedFun a b
+constDefinedFun = MkDefinedFun . const
+
+inconsistentDefinedFun :: DefinedFun a b
+inconsistentDefinedFun = constDefinedFun Inconsistent
+
+-- | Nothing = <inconsistent>
+extendDefinedFun' :: (Eq a, Eq b) => DefinedFun a b -> (a, b) -> Maybe (DefinedFun a b)
+extendDefinedFun' df@(MkDefinedFun f) (x, y) =
+  case f x of
+    Unknown -> Just . MkDefinedFun $ \z ->
+      if z == x
+        then Known y
+        else f z
+    Known y'
+      | y' == y -> Just df
+    _ -> Nothing
+
+extendDefinedFun :: (Eq a, Eq b) => DefinedFun a b -> (a, b) -> DefinedFun a b
+extendDefinedFun df p =
+  case extendDefinedFun' df p of
+    Just df' -> df
+    Nothing -> inconsistentDefinedFun
 
 newtype Cell s a = MkCell { getCell :: STRef s (Defined a, ST s ()) }
 
