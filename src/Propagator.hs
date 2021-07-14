@@ -137,6 +137,7 @@ readIxedCell (MkIxedCell ref) = do
   (x, _) <- readSTRef ref
   return x
 
+-- TODO: Propagate inconsistencies here?
 readIxedCellAt :: IxedCell s x a -> x -> ST s (Defined a)
 readIxedCellAt c x = (`runDefinedFun` x) <$> readIxedCell c
 
@@ -151,8 +152,11 @@ updateDefined (MkIxedCell c) x = do
   where
     go (def, act) = (def <> x, act)
 
+-- TODO: Propagate inconsistencies here?
 update :: (Eq x, Eq a) => IxedCell s x a -> (x, a) -> ST s ()
-update c (x, y) = updateDefined c (MkDefinedFun f)
+update c (x, y) = do
+  r <- readIxedCellAt c x
+  updateDefined c (MkDefinedFun f)
   where
     f z
       | z == x    = Known y
@@ -225,10 +229,12 @@ example1 = do
 
 example2 :: forall s. ST s (Defined Int)
 example2 = do
-  x <- ixedCell (pointFun ('x', 1))
-  y <- ixedCell (pointFun ('y', 2))
+  x <- ixedCell (pointFun ('a', 1))
+  y <- ixedCell (pointFun ('a', 2))
   z <- unknown
 
+  updateDefined x $ pointFun ('a', 10)
+
   add x y z
-  readIxedCellAt x 'x'
+  readIxedCellAt x 'a'
 
