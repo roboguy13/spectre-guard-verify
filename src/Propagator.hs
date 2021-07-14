@@ -4,6 +4,8 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable #-}
 
 module Propagator where
 
@@ -29,6 +31,14 @@ instance Eq a => Semigroup (Defined a) where
 
 instance Eq a => Monoid (Defined a) where
   mempty = Unknown
+
+instance Applicative Defined where
+  pure = Known
+  Known f <*> Known x = Known (f x)
+  Inconsistent <*> _ = Inconsistent
+  _ <*> Inconsistent = Inconsistent
+  Unknown <*> _ = Unknown
+  _ <*> Unknown = Unknown
 
 -- | Indexed (partial function-like) version of @Defined@
 newtype DefinedFun a b = MkDefinedFun { runDefinedFun :: a -> Defined b }
@@ -66,6 +76,9 @@ extendDefinedFun df p =
   case extendDefinedFun' df p of
     Just df' -> df
     Nothing -> inconsistentDefinedFun
+
+definedFunImage :: (Eq b) => DefinedFun a b -> [a] -> Defined [b]
+definedFunImage (MkDefinedFun f) = sequenceA . map f
 
 newtype Cell s a = MkCell { getCell :: STRef s (Defined a, ST s ()) }
 
