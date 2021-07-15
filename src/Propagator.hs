@@ -15,6 +15,7 @@ import           Data.STRef
 import           Control.Monad.ST
 import           Control.Category
 import           Control.Applicative
+import           Control.Monad
 
 -- TODO: Keep track of the origin of inconsistencies
 data Defined a
@@ -79,6 +80,9 @@ pointFun (x, y) = definedFun $ \z ->
 inconsistentFun :: DefinedFun s a b
 inconsistentFun = definedFun (const Inconsistent)
 
+definedFunAct :: DefinedFun s a b -> ST s ()
+definedFunAct (MkDefinedFun (act, _)) = act
+
 setDefinedFun :: (Eq a, Eq b) => (a, b) -> DefinedFun s a b -> ST s (DefinedFun s a b)
 setDefinedFun (x, y) df@(MkDefinedFun (act, f)) =
   case f x of
@@ -89,47 +93,50 @@ setDefinedFun (x, y) df@(MkDefinedFun (act, f)) =
     Unknown -> act *> pure go
     Inconsistent -> pure inconsistentFun
   where
-    go = MkDefinedFun $ \z ->
+    go = MkDefinedFun (act, \z ->
       if z == x
-        then (Known y, pure ())
-        else f z
+        then Known y
+        else f z)
 
 applyDefinedFun :: DefinedFun s a b -> a -> ST s (Defined b)
-applyDefinedFun (MkDefinedFun f) x =
-  let (def, act) = f x
-  in
-  act *> pure def
+applyDefinedFun (MkDefinedFun (act, f)) x =
+  act *> pure (f x)
 
 extendAct :: DefinedFun s a b -> ST s () -> DefinedFun s a b
-extendAct (MkDefinedFun f) newAct = MkDefinedFun $ \z ->
-  let (def, act) = f z
-  in
-  (def, act *> newAct)
+extendAct (MkDefinedFun (act, f)) newAct = MkDefinedFun (act *> newAct, f)
 
 instance Eq b => Semigroup (DefinedFun s a b) where
-  MkDefinedFun f <> MkDefinedFun g =
-    MkDefinedFun (f <> g)
+  MkDefinedFun (actF, f) <> MkDefinedFun (actG, g) =
+    MkDefinedFun (actF *> actG, f <> g)
 
 instance Eq b => Monoid (DefinedFun s a b) where
   mempty = definedFun (const Unknown)
 
 instance Category (DefinedFun s) where
   id = knownFun id
-  MkDefinedFun f . MkDefinedFun g = MkDefinedFun $ \x ->
-    let (gDef, gAct) = g x
-    in
-    case f <$> gDef of
-      Unknown -> (Unknown, gAct)
-      Inconsistent -> (Inconsistent, gAct) -- TODO: Should this be pure ()?
-      Known z -> go gAct z
-
+  MkDefinedFun (actF, f) . MkDefinedFun (actG, g) = MkDefinedFun (actG *> actF, go)
     where
-      go gAct (Known x', act) = (Known x', gAct *> act)
-      go gAct (Unknown, act) = (Unknown, gAct *> act)
-      go gAct (Inconsistent, act) = (Inconsistent, gAct *> act) -- TODO: Should this be pure ()?
+      go x =
+        case f <$> g x of
+          Unknown -> Unknown
+          Inconsistent -> Inconsistent
+          Known Unknown -> Unknown
+          Known Inconsistent -> Inconsistent
+          Known (Known r) -> Known r
+    -- let (gDef, gAct) = g x
+    -- in
+    -- case f <$> gDef of
+    --   Unknown -> (Unknown, gAct)
+    --   Inconsistent -> (Inconsistent, gAct) -- TODO: Should this be pure ()?
+    --   Known z -> go gAct z
+
+    -- where
+    --   go gAct (Known x', act) = (Known x', gAct *> act)
+    --   go gAct (Unknown, act) = (Unknown, gAct *> act)
+    --   go gAct (Inconsistent, act) = (Inconsistent, gAct *> act) -- TODO: Should this be pure ()?
 
 definedFunImage :: DefinedFun s a b -> [a] -> Defined [b]
-definedFunImage (MkDefinedFun f) = sequenceA . map (fst . f)
+definedFunImage (MkDefinedFun (act, f)) = sequenceA . map f
 
 newtype IxedCell s a b = MkIxedCell { getIxedCell :: STRef s (DefinedFun s a b) }
 
@@ -212,19 +219,17 @@ unary f cX cY =
 
 binary :: forall s x a b c. (Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
 binary f cA cB cC = do
-  watch cA $ \g -> do
-    readIxedCell cB >>= \h ->
-      updateDefined cC (MkDefinedFun (go g h)) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
+  watch cA $ \(MkDefinedFun (actG, g)) -> do
+    readIxedCell cB >>= \(MkDefinedFun (actH, h)) ->
+      updateDefined cC (MkDefinedFun (actG *> actH, go g h)) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
 
-  watch cB $ \g -> do
-    readIxedCell cA >>= \h ->
-      updateDefined cC (MkDefinedFun (go h g))
+  watch cB $ \(MkDefinedFun (actG, g)) -> do
+    readIxedCell cA >>= \(MkDefinedFun (actH, h)) ->
+      updateDefined cC (MkDefinedFun (actG *> actH, go h g))
   where
-    go :: DefinedFun s x a -> DefinedFun s x b -> x -> (Defined c, ST s ())
-    go (MkDefinedFun g) (MkDefinedFun h) x =
-      let (gDef, gAct) = g x
-          (hDef, hAct) = h x
-      in (f <$> gDef <*> hDef, gAct *> hAct)
+    go :: (x -> Defined a) -> (x -> Defined b) -> x -> Defined c
+    go g h x =
+      f <$> g x <*> h x
 
 -- -- joinIxedCellsAt :: forall s x a. (Eq x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
 -- -- joinIxedCellsAt x c1 c2 = unaryCtx go go c1 c2
