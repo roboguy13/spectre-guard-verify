@@ -50,13 +50,13 @@ data SensExpr where
   SensT :: NodeId -> SensExpr
 
 -- | The set family for this analysis
-data AnalysisSetFamily a where
-  C_Entry :: NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
-  C_Exit :: NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
+data AnalysisSetFamily a b where
+  C_Entry :: NodeId -> AnalysisSetFamily NodeId (Set (Var, SensExpr))
+  C_Exit :: NodeId -> AnalysisSetFamily NodeId (Set (Var, SensExpr))
 
-  S_Family :: NodeId -> NodeId -> AnalysisSetFamily (Set (Var, SensExpr))
-  B_Family :: NodeId -> AnalysisSetFamily (Set Var)
-  E_Family :: NodeId -> AnalysisSetFamily (Set Var)
+  S_Family :: NodeId -> NodeId -> AnalysisSetFamily (NodeId, NodeId) (Set (Var, SensExpr))
+  B_Family :: NodeId -> AnalysisSetFamily NodeId (Set Var)
+  E_Family :: NodeId -> AnalysisSetFamily NodeId (Set Var)
 
 type AnalysisConstraint r = ConstraintE r Var SensExpr AnalysisSetFamily
 
@@ -114,7 +114,7 @@ getUsedIds_constraint ct =
     x :=: y -> goE x >> goE y
     x :>: y -> goE x >> goE y
   where
-    goSF :: AnalysisSetFamily a -> Writer UsedIds ()
+    goSF :: AnalysisSetFamily a b -> Writer UsedIds ()
     goSF (C_Entry n) = tellNodeIds [n]
     goSF (C_Exit n)  = tellNodeIds [n]
     goSF (S_Family m n) = tellSPairs [(m, n)]
@@ -292,7 +292,10 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   tell $
       [entryConstraint t
       ,(
-          let maybeUnion x g =
+          let maybeUnion :: AnalysisSetFamily a (Set b)
+                      -> (NodeId -> AnalysisSetFamily a (Set b))
+                      -> Expr r Var SensExpr AnalysisSetFamily (Set b)
+              maybeUnion x g =
                 case f_maybe of
                   Nothing -> SetFamily x
                   Just f -> Union (value x) (value (g (annotation f)))

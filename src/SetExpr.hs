@@ -51,7 +51,7 @@ class ElemVal r where
 --   elemRepr _ = elemRepr (Proxy @a)
 
 data Expr r base m f t where
-  SetFamily :: f (Set a) -> Expr r base m f (Set a)
+  SetFamily :: f x (Set a) -> Expr r base m f (Set a)
   BaseVal :: base -> Expr r base m f a
   MonoidVal :: m -> Expr r base m f m
   BoolVal :: Bool -> Expr r base m f Bool
@@ -83,7 +83,7 @@ class Value e v where
 
 instance Value (Expr r base m f base) base where value = BaseVal
 instance Value (Expr r base m f m) m where value = MonoidVal
-instance Value (Expr r base m f (Set a)) (f (Set a)) where value = SetFamily
+instance Value (Expr r base m f (Set a)) (f x (Set a)) where value = SetFamily
 instance Value (Expr r base m f Bool) Bool where value = BoolVal
 instance (Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Expr r base m f (a, b)) (a, b) where
   value (x, y) = Pair (value x) (value y)

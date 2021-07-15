@@ -64,36 +64,43 @@ import qualified Data.Set as Set
 
 import           Data.Set (Set)
 
-import           Lens.Micro
-import           Lens.Micro.TH
+-- import           Lens.Micro
+-- import           Lens.Micro.TH
 
-import           Data.Holmes as Holmes hiding (lift)
-import           Data.Propagator hiding (lift)
+import           Control.Monad.ST
+import           Control.Monad.ST.Class
 
 import           Orphans ()
 import           Ppr
 import           SetExpr
 import           Pattern
 import           ConstraintGen
-import           DOT
+-- import           DOT
+import           Propagator
 -- import           ValidNodeId
 
 generateDOT :: Bool
 generateDOT = True
 
-type IndexedBy = (->)
-
-data VerifyInfo =
+data VerifyInfo s =
   VerifyInfo
-    { _verifyInfoCEntry :: Holmes (NodeId -> Set (Var, SensExpr))
-    , _verifyInfoCExit :: Holmes (NodeId -> Set (Var, SensExpr))
-    , _verifyInfoE :: Holmes (NodeId -> Set Var)
-    , _verifyInfoT :: Holmes (NodeId -> Sensitivity)
-    , _verifyInfoS :: Holmes ((NodeId, NodeId) -> Set (Var, SensExpr))
+    { verifyInfoCEntry :: IxedCell s NodeId (Set (Var, SensExpr))
+    , verifyInfoCExit :: IxedCell s NodeId (Set (Var, SensExpr))
+    , verifyInfoE :: IxedCell s NodeId (Set Var)
+    , verifyInfoT :: IxedCell s NodeId Sensitivity
+    , verifyInfoS :: IxedCell s (NodeId, NodeId) (Set (Var, SensExpr))
     }
-makeLenses ''VerifyInfo
 
-type VerifyInfoLens a = Lens' VerifyInfo a
+getSetFamily :: VerifyInfo s -> AnalysisSetFamily a b -> (a, IxedCell s a b)
+getSetFamily vi (C_Entry n) = (n, verifyInfoCEntry vi)
+getSetFamily vi (C_Exit  n) = (n, verifyInfoCExit  vi)
+getSetFamily vi (S_Family m n) = ((m, n), verifyInfoS vi)
+getSetFamily vi (E_Family n) = (n, verifyInfoE vi)
+getSetFamily vi (B_Family {}) = error "getSetFamily: B_Family"
+
+-- makeLenses ''VerifyInfo
+
+-- type VerifyInfoLens s a = Lens' (VerifyInfo s) a
 
 -- extendValue' :: Eq a => (a -> Maybe b) -> (a, b) -> Maybe (a -> Maybe b)
 -- extendValue' f (x, s) =
@@ -104,9 +111,11 @@ type VerifyInfoLens a = Lens' VerifyInfo a
 --         then Just s
 --         else f y
 
-extendValue :: VerifyInfoLens (Holmes b) -> Holmes b -> Verify ()
-extendValue lens p = do
-  undefined unify
+-- extendValue :: VerifyInfoLens (Holmes b) -> Holmes b -> Verify ()
+-- extendValue lens p = do
+--   undefined unify
+
+
   -- value_maybe <- fmap (^. lens) get
   -- case value_maybe of
   --   Nothing -> inconsistent "!"
@@ -119,9 +128,11 @@ extendValue lens p = do
 
 
 
-data VerifyError = Inconsistency String
+data VerifyError = VerifyInconsistency String
+  deriving (Show)
 
 data VerifyResult = Correct | Incorrect [String]
+  deriving (Show)
 
 instance Semigroup VerifyResult where
   Incorrect xs <> Incorrect ys = Incorrect (xs <> ys)
@@ -132,8 +143,15 @@ instance Semigroup VerifyResult where
 instance Monoid VerifyResult where
   mempty = Correct
 
-newtype Verify a = Verify (StateT VerifyInfo IO a)
-  deriving (Functor, Applicative, Monad, MonadState VerifyInfo)
+newtype Verify s a = Verify (StateT (VerifyInfo s) (ST s) a)
+  deriving (Functor, Applicative, Monad, MonadState (VerifyInfo s), MonadST)
+
+class BuildVerifyInfo a where
+  buildVerifyInfo :: a -> Verify s ()
+
+instance BuildVerifyInfo (AnalysisConstraint a) where
+  buildVerifyInfo (SetFamily x :=: SetFamily y) = undefined
+  buildVerifyInfo (_ :>: _) = error "buildVerifyInfo: (:<:)"
 
 -- class GetVerifyInfoLens f where
 --   getVerifyInfoLens :: f a -> VerifyInfoLens (Maybe a)
