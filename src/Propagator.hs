@@ -214,17 +214,20 @@ watch c@(MkIxedCell ref) k = do
       k md
     -- go def = (def, act *> prop)
 
-unary :: (Ord x, Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
-unary f cX cY =
-  watch cX (updateDefined cY . fmap f)
+unaryWith :: (Ord x, Eq a, Eq b) => (MapDefined x a -> MapDefined x a) -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unaryWith modifyMD f cX cY =
+  watch cX (updateDefined cY . fmap f . modifyMD)
   -- watch cX (updateDefined cY . (knownFun f .))
 
-unaryAt :: (Ord x, Eq a, Eq b) => x -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
-unaryAt x f c1 c2 =
-  watch c1 (updateDefined c2 . fmap f . pointRestriction x)
+unary :: (Ord x, Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unary = unaryWith id
 
-binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
-binary f cA cB cC = do
+unaryAt :: (Ord x, Eq a, Eq b) => x -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unaryAt x = unaryWith (pointRestriction x)
+  -- watch c1 (updateDefined c2 . fmap f . pointRestriction x)
+
+binaryWith :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (forall r. MapDefined x r -> MapDefined x r) -> (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binaryWith modifyMD f cA cB cC = do
   watch cA $ \g -> do
     readIxedCell cB >>= \h ->
       updateDefined cC (go g h) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
@@ -234,7 +237,13 @@ binary f cA cB cC = do
       updateDefined cC (go h g)
   where
     go :: MapDefined x a -> MapDefined x b -> MapDefined x c
-    go g h = f <$> g <.> h
+    go g h = modifyMD (f <$> g <.> h)
+
+binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binary = binaryWith id
+
+binaryAt :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => x -> (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binaryAt x = binaryWith (pointRestriction x)
 
 type Cell s = IxedCell s ()
 
@@ -248,17 +257,6 @@ sameAt :: (Ord x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
 sameAt x c1 c2 = do
   unaryAt x id c1 c2
   unaryAt x id c2 c1
-
--- sameAt :: x -> IxedCell s x a -> IxedCell s x a -> ST s ()
--- sameAt x c1 c2 = do
---   unary go c1 c2
---   unary go c2 c1
---   where
---     go x' =
---       if x' == x
---         then 
-
-
 
 add :: (Ord x, Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
 add cX cY cZ = do
@@ -289,25 +287,24 @@ example1 = do
   negation z w
   add y w o
 
-  sameAt () x y
+  -- sameAt () x y
 
 
   [a, b, c] <- mapM readCell [z, w, o]
   return (a, b, c)
 
--- -- {-
--- -- example2 :: forall s. ST s (Defined Int)
--- -- example2 = do
--- --   x <- ixedCell (pointFun ('a', 1))
--- --   y <- ixedCell (pointFun ('a', 2))
--- --   z <- unknown
--- --   w <- unknown
+example2 :: forall s. ST s (Defined Int)
+example2 = do
+  x <- ixedCell (pointMap ('a', 1))
+  y <- ixedCell (pointMap ('a', 2))
+  z <- unknown
+  w <- unknown
 
--- --   joinIxedCellsAt 'b' x w
 
--- --   updateDefined x $ pointFun ('b', 1)
+  updateDefined x $ pointMap ('a', 10)
+  -- sameAt 'b' x w
+  sameAt 'a' z w
 
--- --   add x y z
--- --   readIxedCellAt w 'a'
--- -- -}
+  add x y z
+  readIxedCellAt w 'a'
 

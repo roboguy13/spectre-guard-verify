@@ -98,35 +98,20 @@ getSetFamily vi (S_Family m n) = ((m, n), verifyInfoS vi)
 getSetFamily vi (E_Family n) = (n, verifyInfoE vi)
 getSetFamily vi (B_Family {}) = error "getSetFamily: B_Family"
 
--- makeLenses ''VerifyInfo
 
--- type VerifyInfoLens s a = Lens' (VerifyInfo s) a
+-- | c1(x) U c2(x) = rhs
+unionAt :: (Ord a, Ord b) => a -> IxedCell s a (Set b) -> IxedCell s a (Set b) -> IxedCell s a (Set b) -> ST s ()
+unionAt x c1 c2 rhs = do
+  binaryAt x Set.union c1 c2 rhs
+  -- TODO: Should there be reverse operations?
 
--- extendValue' :: Eq a => (a -> Maybe b) -> (a, b) -> Maybe (a -> Maybe b)
--- extendValue' f (x, s) =
---   case f x of
---     Just _ -> Nothing -- Inconsistency
---     Nothing -> Just $ \y ->
---       if y == x
---         then Just s
---         else f y
+emptySetAt :: (Ord a, Ord b) => a -> ST s (IxedCell s a (Set b))
+emptySetAt x = knownAt (x, mempty)
 
--- extendValue :: VerifyInfoLens (Holmes b) -> Holmes b -> Verify ()
--- extendValue lens p = do
---   undefined unify
-
-
-  -- value_maybe <- fmap (^. lens) get
-  -- case value_maybe of
-  --   Nothing -> inconsistent "!"
-  --   Just value' -> modify (lens .~ Just value')
-
--- assignValue :: VerifyInfoLens (Maybe b) -> VerifyInfoLens (Maybe b) -> Verify ()
--- assignValue targetLens lens = do
---   x <- fmap (^. lens) get
---   modify (targetLens .~ x)
-
-
+unionSingleAt :: (Ord a, Ord b) => a -> b -> IxedCell s a (Set b) -> IxedCell s a (Set b) -> ST s ()
+unionSingleAt x y c1 rhs =
+  unaryAt x (Set.insert y) c1 rhs
+  -- TODO: Should there be reverse operations?
 
 data VerifyError = VerifyInconsistency String
   deriving (Show)
