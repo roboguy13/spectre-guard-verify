@@ -96,6 +96,21 @@ pointRestriction x (MkMapDefined (Known m)) =
     Just y  -> pointMap (x, y)
 pointRestriction _ md = md
 
+rekeyedPointRestriction :: (Ord x, Ord y) => x -> y -> MapDefined x a -> MapDefined y a
+rekeyedPointRestriction origKey newKey (MkMapDefined (Known m)) =
+  case Map.lookup origKey m of
+    Nothing -> MkMapDefined Unknown
+    Just v  -> pointMap (newKey, v)
+rekeyedPointRestriction _ _ (MkMapDefined Unknown) = MkMapDefined Unknown
+rekeyedPointRestriction _ _ (MkMapDefined Inconsistent) = MkMapDefined Inconsistent
+
+rekey :: (Ord x) => x -> x -> MapDefined x a -> MapDefined x a
+rekey origKey newKey (MkMapDefined (Known m)) =
+  case Map.lookup origKey m of
+    Nothing -> MkMapDefined Unknown
+    Just x -> MkMapDefined $ Known $ Map.insert newKey x $ Map.delete origKey m
+rekey _ _ md = md
+
 mapDefinedLookup :: Ord a => MapDefined a b -> a -> Defined b
 mapDefinedLookup (MkMapDefined (Known m)) x =
   case Map.lookup x m of
@@ -214,7 +229,7 @@ watch c@(MkIxedCell ref) k = do
       k md
     -- go def = (def, act *> prop)
 
-unaryWith :: (Ord x, Eq a, Eq b) => (MapDefined x a -> MapDefined x a) -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unaryWith :: (Ord x, Ord y, Eq a, Eq b) => (MapDefined x a -> MapDefined y a) -> (a -> b) -> IxedCell s x a -> IxedCell s y b -> ST s ()
 unaryWith modifyMD f cX cY =
   watch cX (updateDefined cY . fmap f . modifyMD)
   -- watch cX (updateDefined cY . (knownFun f .))
@@ -224,26 +239,32 @@ unary = unaryWith id
 
 unaryAt :: (Ord x, Eq a, Eq b) => x -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
 unaryAt x = unaryWith (pointRestriction x)
-  -- watch c1 (updateDefined c2 . fmap f . pointRestriction x)
 
-binaryWith :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (forall r. MapDefined x r -> MapDefined x r) -> (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
-binaryWith modifyMD f cA cB cC = do
+unaryAt2 :: (Ord x, Ord y, Eq a, Eq b) => x -> y -> (a -> b) -> IxedCell s x a -> IxedCell s y b -> ST s ()
+unaryAt2 x y = unaryWith (rekeyedPointRestriction x y)
+
+binaryWith :: forall s x y z a b c. (Ord x, Ord y, Ord z, Eq a, Eq b, Eq c) =>
+  (forall r. MapDefined x r -> MapDefined y r) -> (forall r. MapDefined y r -> MapDefined z r) -> (a -> b -> c) -> IxedCell s x a -> IxedCell s y b -> IxedCell s z c -> ST s ()
+binaryWith modifyMD_xy modifyMD_yz f cA cB cC = do
   watch cA $ \g -> do
     readIxedCell cB >>= \h ->
-      updateDefined cC (go g h) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
+      updateDefined cC (go (modifyMD_xy g) h)
 
   watch cB $ \g -> do
     readIxedCell cA >>= \h ->
-      updateDefined cC (go h g)
+      updateDefined cC (go (modifyMD_xy h) g)
   where
-    go :: MapDefined x a -> MapDefined x b -> MapDefined x c
-    go g h = modifyMD (f <$> g <.> h)
+    -- go :: MapDefined x a -> MapDefined x b -> MapDefined z c
+    go g h = modifyMD_yz (f <$> g <.> h)
 
 binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
-binary = binaryWith id
+binary = binaryWith id id
 
-binaryAt :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => x -> (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
-binaryAt x = binaryWith (pointRestriction x)
+binaryAt :: (Ord x, Eq a, Eq b, Eq c) => x -> (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binaryAt x = binaryWith id (pointRestriction x)
+
+binaryAt2 :: (Ord x, Ord y, Ord z, Eq a, Eq b, Eq c) => x -> y -> z -> (a -> b -> c) -> IxedCell s x a -> IxedCell s y b -> IxedCell s z c -> ST s ()
+binaryAt2 x y z = binaryWith (rekeyedPointRestriction x y) (rekeyedPointRestriction y z)
 
 type Cell s = IxedCell s ()
 

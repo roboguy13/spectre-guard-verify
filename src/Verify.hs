@@ -91,12 +91,13 @@ data VerifyInfo s =
     , verifyInfoS :: IxedCell s (NodeId, NodeId) (Set (Var, SensExpr))
     }
 
-getSetFamily :: VerifyInfo s -> AnalysisSetFamily a b -> (a, IxedCell s a b)
-getSetFamily vi (C_Entry n) = (n, verifyInfoCEntry vi)
-getSetFamily vi (C_Exit  n) = (n, verifyInfoCExit  vi)
-getSetFamily vi (S_Family m n) = ((m, n), verifyInfoS vi)
-getSetFamily vi (E_Family n) = (n, verifyInfoE vi)
-getSetFamily vi (B_Family {}) = error "getSetFamily: B_Family"
+getSetFamily' :: VerifyInfo s -> AnalysisSetFamily a b -> (a, IxedCell s a b)
+getSetFamily' vi (C_Entry n) = (n, verifyInfoCEntry vi)
+getSetFamily' vi (C_Exit  n) = (n, verifyInfoCExit  vi)
+getSetFamily' vi (S_Family m n) = ((m, n), verifyInfoS vi)
+getSetFamily' vi (E_Family n) = (n, verifyInfoE vi)
+getSetFamily' vi (B_Family {}) = error "getSetFamily: B_Family"
+
 
 
 -- | c1(x) U c2(x) = rhs
@@ -131,11 +132,17 @@ instance Monoid VerifyResult where
 newtype Verify s a = Verify (StateT (VerifyInfo s) (ST s) a)
   deriving (Functor, Applicative, Monad, MonadState (VerifyInfo s), MonadST)
 
+getSetFamily :: AnalysisSetFamily a -> Verify (a, IxedCell s a b)
+getSetFamily sf = (`getSetFamily` sf) <$> ask
+
 class BuildVerifyInfo a where
   buildVerifyInfo :: a -> Verify s ()
 
 instance BuildVerifyInfo (AnalysisConstraint a) where
-  buildVerifyInfo (SetFamily x :=: SetFamily y) = undefined
+  buildVerifyInfo (SetFamily lhs :=: SetFamily rhs) = do
+    (lhsX, lhsCell) <- getSetFamily
+    (rhsX, rhsCell) <- getSetFamily
+    undefined
   buildVerifyInfo (_ :>: _) = error "buildVerifyInfo: (:<:)"
 
 -- class GetVerifyInfoLens f where
