@@ -74,7 +74,7 @@ applyToDefined2 = liftA2
 
 -- | Indexed (partial function-like) version of @Defined@
 newtype MapDefined a b = MkMapDefined (Defined (Map a b))
-  deriving (Functor)
+  deriving (Functor, Eq)
   -- deriving (Functor, Apply)
 
 instance Ord a => Apply (MapDefined a) where
@@ -88,6 +88,13 @@ mapDefined = MkMapDefined . Known
 
 pointMap :: Ord a => (a, b) -> MapDefined a b
 pointMap (x, y) = mapDefined $ Map.fromList [(x, y)]
+
+pointRestriction :: Ord a => a -> MapDefined a b -> MapDefined a b
+pointRestriction x (MkMapDefined (Known m)) =
+  case Map.lookup x m of
+    Nothing -> MkMapDefined Unknown
+    Just y  -> pointMap (x, y)
+pointRestriction _ md = md
 
 mapDefinedLookup :: Ord a => MapDefined a b -> a -> Defined b
 mapDefinedLookup (MkMapDefined (Known m)) x =
@@ -167,8 +174,9 @@ ixedCellImage c xs =
 updateDefined :: (Ord x, Eq a) => IxedCell s x a -> MapDefined x a -> ST s ()
 updateDefined (MkIxedCell c) x = do
   (act, md) <- readSTRef c
-  writeSTRef c (act, md <> x)
-    -- act
+  let mdx = md <> x
+  writeSTRef c (act, mdx)
+  when (mdx /= md) act
   -- where
   --   go (def, act) = (def <> x, act)
 
@@ -186,6 +194,8 @@ update c@(MkIxedCell ref) (x, y) = do
   -- md <- readIxedCellAt c x
   (act, md) <- readSTRef ref
   writeSTRef ref (act, mapDefinedExtend md (x, y))
+  act
+  -- act
   -- updateDefined c (definedFun f)
   -- where
   --   f z
@@ -199,9 +209,9 @@ watch c@(MkIxedCell ref) k = do
   -- modifySTRef ref (`extendAct` prop)
   prop md
   where
-    prop md = k md
-      -- fun <- readSTRef ref
-      -- k fun
+    prop md = do -- k md
+      (act, md) <- readSTRef ref
+      k md
     -- go def = (def, act *> prop)
 
 unary :: (Ord x, Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
@@ -209,22 +219,9 @@ unary f cX cY =
   watch cX (updateDefined cY . fmap f)
   -- watch cX (updateDefined cY . (knownFun f .))
 
--- -- -- unaryCtx :: forall s x a b. (Eq a, Eq b) => ((x, a) -> Defined b) -> ((x, b) -> Defined a) -> IxedCell s x a -> IxedCell s x b -> ST s ()
--- -- -- unaryCtx f g cX cY@(MkIxedCell cY_ref) = do
--- -- --   -- (cY_fun, _) <- readSTRef cY_ref
--- -- --   watch cX (updateDefined cY . MkDefinedFun . go f)
--- -- --   watch cY (updateDefined cX . MkDefinedFun . go g)
--- -- --   where
--- -- --     -- go :: DefinedFun x a -> x -> Defined b
--- -- --     go fun d x =
--- -- --       case runDefinedFun d x of
--- -- --         Inconsistent -> Inconsistent
--- -- --         Unknown -> Unknown
--- -- --         Known dx -> fun (x, dx)
--- -- --           -- case f (x, dx) of
--- -- --           --   Inconsistent -> Inconsistent
--- -- --           --   Known r -> Known r
--- -- --           --   Unknown -> runDefinedFun cY_fun x
+unaryAt :: (Ord x, Eq a, Eq b) => x -> (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unaryAt x f c1 c2 =
+  watch c1 (updateDefined c2 . fmap f . pointRestriction x)
 
 binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
 binary f cA cB cC = do
@@ -239,24 +236,6 @@ binary f cA cB cC = do
     go :: MapDefined x a -> MapDefined x b -> MapDefined x c
     go g h = f <$> g <.> h
 
-    -- go :: (x -> Defined a) -> (x -> Defined b) -> x -> Defined c
-    -- go g h x =
-    --   f <$> g x <*> h x
-
--- -- -- joinIxedCellsAt :: forall s x a. (Eq x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
--- -- -- joinIxedCellsAt x c1 c2 = unaryCtx go go c1 c2
--- -- --   where
--- -- --     -- go :: (x, a) -> Defined a
--- -- --     go (x', r) =
--- -- --       if x' == x
--- -- --         then Known r
--- -- --         else Unknown --liftA2 (<>) (readIxedCellAt c1 x') (readIxedCellAt c2 x')
-
--- cellAct :: IxedCell s a b -> ST s ()
--- cellAct (MkIxedCell ref) = do
---   MkDefinedFun (act, _) <- readSTRef ref
---   act
-
 type Cell s = IxedCell s ()
 
 known :: a -> ST s (Cell s a)
@@ -264,6 +243,22 @@ known x = knownAt ((), x)
 
 readCell :: Cell s a -> ST s (Defined a)
 readCell c = readIxedCellAt c ()
+
+sameAt :: (Ord x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
+sameAt x c1 c2 = do
+  unaryAt x id c1 c2
+  unaryAt x id c2 c1
+
+-- sameAt :: x -> IxedCell s x a -> IxedCell s x a -> ST s ()
+-- sameAt x c1 c2 = do
+--   unary go c1 c2
+--   unary go c2 c1
+--   where
+--     go x' =
+--       if x' == x
+--         then 
+
+
 
 add :: (Ord x, Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
 add cX cY cZ = do
@@ -281,9 +276,6 @@ negation cX cY = do
   unary negate cX cY
   unary negate cY cX
 
-
-
-
 example1 :: forall s. ST s (Defined Int, Defined Int, Defined Int)
 example1 = do
   x <- known 2 :: ST s (Cell s Int)
@@ -296,6 +288,9 @@ example1 = do
   add x y z
   negation z w
   add y w o
+
+  sameAt () x y
+
 
   [a, b, c] <- mapM readCell [z, w, o]
   return (a, b, c)
