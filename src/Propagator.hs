@@ -2,6 +2,7 @@
 --
 
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -17,12 +18,22 @@ import           Control.Category
 import           Control.Applicative
 import           Control.Monad
 
+import qualified Data.Map as Map
+import           Data.Map (Map)
+
+import           Data.Functor.Apply
+
+import           Data.Maybe (catMaybes)
+
 -- TODO: Keep track of the origin of inconsistencies
 data Defined a
   = Unknown
   | Known a
   | Inconsistent
   deriving (Eq, Ord, Show, Read, Functor)
+
+instance Apply Defined where
+  (<.>) = (<*>)
 
 instance Eq a => Semigroup (Defined a) where
   Inconsistent <> _ = Inconsistent
@@ -62,190 +73,199 @@ applyToDefined2 :: (a -> b -> c) -> Defined a -> Defined b -> Defined c
 applyToDefined2 = liftA2
 
 -- | Indexed (partial function-like) version of @Defined@
-newtype DefinedFun s a b = MkDefinedFun (ST s (), a -> Defined b)
+newtype MapDefined a b = MkMapDefined (Defined (Map a b))
+  deriving (Functor)
+  -- deriving (Functor, Apply)
 
-definedFun :: (a -> Defined b) -> DefinedFun s a b
-definedFun f = do
-  MkDefinedFun (pure (), f)
+instance Ord a => Apply (MapDefined a) where
+  MkMapDefined (Known f) <.> MkMapDefined (Known x) = MkMapDefined (Known (f <.> x))
+  MkMapDefined Inconsistent <.> _ = MkMapDefined Inconsistent
+  _ <.> MkMapDefined Inconsistent = MkMapDefined Inconsistent
+  _ <.> _ = MkMapDefined Unknown
 
-knownFun :: (a -> b) -> DefinedFun s a b
-knownFun f = definedFun (Known . f)
+mapDefined :: Map a b -> MapDefined a b
+mapDefined = MkMapDefined . Known
 
-pointFun :: Eq a => (a, b) -> DefinedFun s a b
-pointFun (x, y) = definedFun $ \z ->
-  if z == x
-    then Known y
-    else Unknown
+pointMap :: Ord a => (a, b) -> MapDefined a b
+pointMap (x, y) = mapDefined $ Map.fromList [(x, y)]
 
-inconsistentFun :: DefinedFun s a b
-inconsistentFun = definedFun (const Inconsistent)
+mapDefinedLookup :: Ord a => MapDefined a b -> a -> Defined b
+mapDefinedLookup (MkMapDefined (Known m)) x =
+  case Map.lookup x m of
+    Just r -> Known r
+    Nothing -> Unknown
+mapDefinedLookup (MkMapDefined Unknown) _ = Unknown
+mapDefinedLookup (MkMapDefined Inconsistent) _ = Inconsistent
 
-definedFunAct :: DefinedFun s a b -> ST s ()
-definedFunAct (MkDefinedFun (act, _)) = act
-
-setDefinedFun :: (Eq a, Eq b) => (a, b) -> DefinedFun s a b -> ST s (DefinedFun s a b)
-setDefinedFun (x, y) df@(MkDefinedFun (act, f)) =
-  case f x of
-    Known y' ->
-      if y' == y
-        then act *> pure df
-        else pure inconsistentFun
-    Unknown -> act *> pure go
-    Inconsistent -> pure inconsistentFun
+mapDefinedCompose :: forall a b c. (Ord a, Ord b) => MapDefined b c -> MapDefined a b -> MapDefined a c
+mapDefinedCompose (MkMapDefined (Known f)) (MkMapDefined (Known g)) =
+  let gAssocs = Map.assocs g
+  in
+  case map go gAssocs of
+    [] -> MkMapDefined Unknown
+    xs -> MkMapDefined $ Known $ Map.fromList $ catMaybes xs
   where
-    go = MkDefinedFun (act, \z ->
-      if z == x
-        then Known y
-        else f z)
+    go :: (a, b) -> Maybe (a, c)
+    go (x, y) =
+      case Map.lookup y f of
+        Just z -> Just (x, z)
+        Nothing -> Nothing
 
-applyDefinedFun :: DefinedFun s a b -> a -> ST s (Defined b)
-applyDefinedFun (MkDefinedFun (act, f)) x =
-  act *> pure (f x)
+instance (Ord a, Eq b) => Semigroup (MapDefined a b) where
+  MkMapDefined (Known m1) <> MkMapDefined (Known m2) =
+    if or . Map.elems $ Map.intersectionWith (/=) m1 m2
+      then MkMapDefined Inconsistent
+      else MkMapDefined (Known (m1 <> m2))
 
-extendAct :: DefinedFun s a b -> ST s () -> DefinedFun s a b
-extendAct (MkDefinedFun (act, f)) newAct = MkDefinedFun (act *> newAct, f)
+  MkMapDefined x <> MkMapDefined y = MkMapDefined (x <> y)
 
-instance Eq b => Semigroup (DefinedFun s a b) where
-  MkDefinedFun (actF, f) <> MkDefinedFun (actG, g) =
-    MkDefinedFun (actF *> actG, f <> g)
+instance (Ord a, Eq b) => Monoid (MapDefined a b) where
+  mempty = MkMapDefined Unknown
 
-instance Eq b => Monoid (DefinedFun s a b) where
-  mempty = definedFun (const Unknown)
+mapDefinedImage :: Ord a => MapDefined a b -> [a] -> Defined [b]
+mapDefinedImage md xs =
+  sequenceA $ map (mapDefinedLookup md) xs
 
-instance Category (DefinedFun s) where
-  id = knownFun id
-  MkDefinedFun (actF, f) . MkDefinedFun (actG, g) = MkDefinedFun (actG *> actF, go)
-    where
-      go x =
-        case f <$> g x of
-          Unknown -> Unknown
-          Inconsistent -> Inconsistent
-          Known Unknown -> Unknown
-          Known Inconsistent -> Inconsistent
-          Known (Known r) -> Known r
-    -- let (gDef, gAct) = g x
-    -- in
-    -- case f <$> gDef of
-    --   Unknown -> (Unknown, gAct)
-    --   Inconsistent -> (Inconsistent, gAct) -- TODO: Should this be pure ()?
-    --   Known z -> go gAct z
+mapDefinedExtend :: (Ord a, Eq b) => MapDefined a b -> (a, b) -> MapDefined a b
+mapDefinedExtend (MkMapDefined Unknown) p = pointMap p
+mapDefinedExtend (MkMapDefined Inconsistent) _ = MkMapDefined Inconsistent
+mapDefinedExtend md@(MkMapDefined (Known m)) (x, y) =
+  case Map.lookup x m of
+    Nothing -> MkMapDefined (Known (Map.insert x y m))
+    Just y' ->
+      if y' == y
+        then md
+        else MkMapDefined Inconsistent
 
-    -- where
-    --   go gAct (Known x', act) = (Known x', gAct *> act)
-    --   go gAct (Unknown, act) = (Unknown, gAct *> act)
-    --   go gAct (Inconsistent, act) = (Inconsistent, gAct *> act) -- TODO: Should this be pure ()?
+newtype IxedCell s a b = MkIxedCell { getIxedCell :: STRef s (ST s (), MapDefined a b) }
 
-definedFunImage :: DefinedFun s a b -> [a] -> Defined [b]
-definedFunImage (MkDefinedFun (act, f)) = sequenceA . map f
+ixedCell :: MapDefined a b -> ST s (IxedCell s a b)
+ixedCell df = MkIxedCell <$> newSTRef (pure (), df)
 
-newtype IxedCell s a b = MkIxedCell { getIxedCell :: STRef s (DefinedFun s a b) }
+-- known :: a -> ST s (IxedCell s x a)
+-- known x = MkIxedCell <$> newSTRef (definedFun (const (Known x)))
 
-ixedCell :: DefinedFun s a b -> ST s (IxedCell s a b)
-ixedCell df = MkIxedCell <$> newSTRef df
-
-known :: a -> ST s (IxedCell s x a)
-known x = MkIxedCell <$> newSTRef (definedFun (const (Known x)))
+knownAt :: Ord x => (x, a) -> ST s (IxedCell s x a)
+knownAt p = MkIxedCell <$> newSTRef (pure (), pointMap p)
 
 unknown :: ST s (IxedCell s x a)
-unknown = MkIxedCell <$> newSTRef (definedFun (const Unknown))
+unknown = MkIxedCell <$> newSTRef (pure (), MkMapDefined Unknown)
 
-readIxedCell :: IxedCell s x a -> ST s (DefinedFun s x a)
+readIxedCell :: IxedCell s x a -> ST s (MapDefined x a)
 readIxedCell (MkIxedCell ref) =
-  readSTRef ref
+  snd <$> readSTRef ref
 
 -- TODO: Propagate inconsistencies here?
-readIxedCellAt :: IxedCell s x a -> x -> ST s (Defined a)
-readIxedCellAt (MkIxedCell ref) x = do
-  (`applyDefinedFun` x) =<< readSTRef ref
+readIxedCellAt :: Ord x => IxedCell s x a -> x -> ST s (Defined a)
+readIxedCellAt (MkIxedCell ref) x =
+  (`mapDefinedLookup` x) . snd <$> readSTRef ref
 
-ixedCellImage :: IxedCell s x a -> [x] -> ST s (Defined [a])
-ixedCellImage c xs = --fmap sequenceA (mapM ((getDefined .) . flip runDefinedFun) xs <$> readIxedCell c)
+ixedCellImage :: Ord x => IxedCell s x a -> [x] -> ST s (Defined [a])
+ixedCellImage c xs =
   fmap sequenceA $ mapM (readIxedCellAt c) xs
 
-updateDefined :: Eq a => IxedCell s x a -> DefinedFun s x a -> ST s ()
+updateDefined :: (Ord x, Eq a) => IxedCell s x a -> MapDefined x a -> ST s ()
 updateDefined (MkIxedCell c) x = do
-  defFun <- readSTRef c
-  writeSTRef c (defFun <> x)
+  (act, md) <- readSTRef c
+  writeSTRef c (act, md <> x)
     -- act
   -- where
   --   go (def, act) = (def <> x, act)
 
--- -- -- updateDefinedAct :: Eq a => IxedCell s x a -> DefinedFun x a -> ST s () -> ST s ()
--- -- -- updateDefinedAct c@(MkIxedCell ref) x act = do
--- -- --   updateDefined c x
--- -- --   modifySTRef ref (\(def, origAct) -> (def, origAct *> act))
+-- -- -- -- updateDefinedAct :: Eq a => IxedCell s x a -> DefinedFun x a -> ST s () -> ST s ()
+-- -- -- -- updateDefinedAct c@(MkIxedCell ref) x act = do
+-- -- -- --   updateDefined c x
+-- -- -- --   modifySTRef ref (\(def, origAct) -> (def, origAct *> act))
+
+getAct :: IxedCell s x a -> ST s ()
+getAct (MkIxedCell c) = fst =<< readSTRef c
 
 -- TODO: Propagate inconsistencies here?
-update :: (Eq x, Eq a) => IxedCell s x a -> (x, a) -> ST s ()
-update c (x, y) = do
-  r <- readIxedCellAt c x
+update :: (Ord x, Eq a) => IxedCell s x a -> (x, a) -> ST s ()
+update c@(MkIxedCell ref) (x, y) = do
+  -- md <- readIxedCellAt c x
+  (act, md) <- readSTRef ref
+  writeSTRef ref (act, mapDefinedExtend md (x, y))
+  -- updateDefined c (definedFun f)
+  -- where
+  --   f z
+  --     | z == x    = Known y
+  --     | otherwise = Unknown
 
-  updateDefined c (definedFun f)
-  where
-    f z
-      | z == x    = Known y
-      | otherwise = Unknown
-
-watch :: IxedCell s x a -> (DefinedFun s x a -> ST s ()) -> ST s ()
+watch :: IxedCell s x a -> (MapDefined x a -> ST s ()) -> ST s ()
 watch c@(MkIxedCell ref) k = do
-  modifySTRef ref (`extendAct` prop)
-  -- prop
+  (act, md) <- readSTRef ref
+  writeSTRef ref (act *> prop md, md)
+  -- modifySTRef ref (`extendAct` prop)
+  prop md
   where
-    prop = do
-      fun <- readSTRef ref
-      k fun
+    prop md = k md
+      -- fun <- readSTRef ref
+      -- k fun
     -- go def = (def, act *> prop)
 
-unary :: (Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+unary :: (Ord x, Eq a, Eq b) => (a -> b) -> IxedCell s x a -> IxedCell s x b -> ST s ()
 unary f cX cY =
-  watch cX (updateDefined cY . (knownFun f .))
+  watch cX (updateDefined cY . fmap f)
+  -- watch cX (updateDefined cY . (knownFun f .))
 
--- -- unaryCtx :: forall s x a b. (Eq a, Eq b) => ((x, a) -> Defined b) -> ((x, b) -> Defined a) -> IxedCell s x a -> IxedCell s x b -> ST s ()
--- -- unaryCtx f g cX cY@(MkIxedCell cY_ref) = do
--- --   -- (cY_fun, _) <- readSTRef cY_ref
--- --   watch cX (updateDefined cY . MkDefinedFun . go f)
--- --   watch cY (updateDefined cX . MkDefinedFun . go g)
--- --   where
--- --     -- go :: DefinedFun x a -> x -> Defined b
--- --     go fun d x =
--- --       case runDefinedFun d x of
--- --         Inconsistent -> Inconsistent
--- --         Unknown -> Unknown
--- --         Known dx -> fun (x, dx)
--- --           -- case f (x, dx) of
--- --           --   Inconsistent -> Inconsistent
--- --           --   Known r -> Known r
--- --           --   Unknown -> runDefinedFun cY_fun x
+-- -- -- unaryCtx :: forall s x a b. (Eq a, Eq b) => ((x, a) -> Defined b) -> ((x, b) -> Defined a) -> IxedCell s x a -> IxedCell s x b -> ST s ()
+-- -- -- unaryCtx f g cX cY@(MkIxedCell cY_ref) = do
+-- -- --   -- (cY_fun, _) <- readSTRef cY_ref
+-- -- --   watch cX (updateDefined cY . MkDefinedFun . go f)
+-- -- --   watch cY (updateDefined cX . MkDefinedFun . go g)
+-- -- --   where
+-- -- --     -- go :: DefinedFun x a -> x -> Defined b
+-- -- --     go fun d x =
+-- -- --       case runDefinedFun d x of
+-- -- --         Inconsistent -> Inconsistent
+-- -- --         Unknown -> Unknown
+-- -- --         Known dx -> fun (x, dx)
+-- -- --           -- case f (x, dx) of
+-- -- --           --   Inconsistent -> Inconsistent
+-- -- --           --   Known r -> Known r
+-- -- --           --   Unknown -> runDefinedFun cY_fun x
 
-binary :: forall s x a b c. (Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
+binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
 binary f cA cB cC = do
-  watch cA $ \(MkDefinedFun (actG, g)) -> do
-    readIxedCell cB >>= \(MkDefinedFun (actH, h)) ->
-      updateDefined cC (MkDefinedFun (actG *> actH, go g h)) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
+  watch cA $ \g -> do
+    readIxedCell cB >>= \h ->
+      updateDefined cC (go g h) --liftA2 f <$> applyDefinedFun g <*> applyDefinedFun h))
 
-  watch cB $ \(MkDefinedFun (actG, g)) -> do
-    readIxedCell cA >>= \(MkDefinedFun (actH, h)) ->
-      updateDefined cC (MkDefinedFun (actG *> actH, go h g))
+  watch cB $ \g -> do
+    readIxedCell cA >>= \h ->
+      updateDefined cC (go h g)
   where
-    go :: (x -> Defined a) -> (x -> Defined b) -> x -> Defined c
-    go g h x =
-      f <$> g x <*> h x
+    go :: MapDefined x a -> MapDefined x b -> MapDefined x c
+    go g h = f <$> g <.> h
 
--- -- joinIxedCellsAt :: forall s x a. (Eq x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
--- -- joinIxedCellsAt x c1 c2 = unaryCtx go go c1 c2
--- --   where
--- --     -- go :: (x, a) -> Defined a
--- --     go (x', r) =
--- --       if x' == x
--- --         then Known r
--- --         else Unknown --liftA2 (<>) (readIxedCellAt c1 x') (readIxedCellAt c2 x')
+    -- go :: (x -> Defined a) -> (x -> Defined b) -> x -> Defined c
+    -- go g h x =
+    --   f <$> g x <*> h x
+
+-- -- -- joinIxedCellsAt :: forall s x a. (Eq x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
+-- -- -- joinIxedCellsAt x c1 c2 = unaryCtx go go c1 c2
+-- -- --   where
+-- -- --     -- go :: (x, a) -> Defined a
+-- -- --     go (x', r) =
+-- -- --       if x' == x
+-- -- --         then Known r
+-- -- --         else Unknown --liftA2 (<>) (readIxedCellAt c1 x') (readIxedCellAt c2 x')
+
+-- cellAct :: IxedCell s a b -> ST s ()
+-- cellAct (MkIxedCell ref) = do
+--   MkDefinedFun (act, _) <- readSTRef ref
+--   act
 
 type Cell s = IxedCell s ()
+
+known :: a -> ST s (Cell s a)
+known x = knownAt ((), x)
 
 readCell :: Cell s a -> ST s (Defined a)
 readCell c = readIxedCellAt c ()
 
-add :: (Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
+add :: (Ord x, Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
 add cX cY cZ = do
     -- cX + cY = cZ
   binary (+) cX cY cZ
@@ -256,7 +276,7 @@ add cX cY cZ = do
     -- cZ - cX = cY
   binary (-) cZ cX cY
 
-negation :: (Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> ST s ()
+negation :: (Ord x, Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> ST s ()
 negation cX cY = do
   unary negate cX cY
   unary negate cY cX
@@ -280,19 +300,19 @@ example1 = do
   [a, b, c] <- mapM readCell [z, w, o]
   return (a, b, c)
 
--- {-
--- example2 :: forall s. ST s (Defined Int)
--- example2 = do
---   x <- ixedCell (pointFun ('a', 1))
---   y <- ixedCell (pointFun ('a', 2))
---   z <- unknown
---   w <- unknown
+-- -- {-
+-- -- example2 :: forall s. ST s (Defined Int)
+-- -- example2 = do
+-- --   x <- ixedCell (pointFun ('a', 1))
+-- --   y <- ixedCell (pointFun ('a', 2))
+-- --   z <- unknown
+-- --   w <- unknown
 
---   joinIxedCellsAt 'b' x w
+-- --   joinIxedCellsAt 'b' x w
 
---   updateDefined x $ pointFun ('b', 1)
+-- --   updateDefined x $ pointFun ('b', 1)
 
---   add x y z
---   readIxedCellAt w 'a'
--- -}
+-- --   add x y z
+-- --   readIxedCellAt w 'a'
+-- -- -}
 
