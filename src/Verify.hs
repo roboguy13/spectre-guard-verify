@@ -54,6 +54,7 @@ import           Data.Kind
 import           Data.Constraint
 
 import           Data.Foldable
+import           Data.Functor.Apply
 
 import qualified Data.ByteString as BS
 
@@ -68,6 +69,7 @@ import           Data.Set (Set)
 -- import           Lens.Micro.TH
 
 import           Control.Monad.ST
+import           Data.STRef
 import           Control.Monad.ST.Class
 
 import           Orphans ()
@@ -87,7 +89,7 @@ data VerifyInfo s =
     { verifyInfoCEntry :: IxedCell s NodeId (Set (Var, SensExpr))
     , verifyInfoCExit :: IxedCell s NodeId (Set (Var, SensExpr))
     , verifyInfoE :: IxedCell s NodeId (Set Var)
-    , verifyInfoT :: IxedCell s NodeId Sensitivity
+    , verifyInfoT :: IxedCell s NodeId SensExpr
     , verifyInfoS :: IxedCell s (NodeId, NodeId) (Set (Var, SensExpr))
     }
 
@@ -100,10 +102,10 @@ getSetFamily' vi (B_Family {}) = error "getSetFamily: B_Family"
 
 
 
--- | c1(x) U c2(x) = rhs
-unionAt :: (Ord a, Ord b) => a -> IxedCell s a (Set b) -> IxedCell s a (Set b) -> IxedCell s a (Set b) -> ST s ()
-unionAt x c1 c2 rhs = do
-  binaryAt x Set.union c1 c2 rhs
+-- | c1(x) U c2(y) = rhs(z)
+unionAt :: (Ord x, Ord y, Ord z, Ord a) => x -> y -> z -> IxedCell s x (Set a) -> IxedCell s y (Set a) -> IxedCell s z (Set a) -> ST s ()
+unionAt x y z c1 c2 rhs = do
+  binaryAt2 x y z Set.union c1 c2 rhs
   -- TODO: Should there be reverse operations?
 
 emptySetAt :: (Ord a, Ord b) => a -> ST s (IxedCell s a (Set b))
@@ -132,17 +134,109 @@ instance Monoid VerifyResult where
 newtype Verify s a = Verify (StateT (VerifyInfo s) (ST s) a)
   deriving (Functor, Applicative, Monad, MonadState (VerifyInfo s), MonadST)
 
-getSetFamily :: AnalysisSetFamily a -> Verify (a, IxedCell s a b)
-getSetFamily sf = (`getSetFamily` sf) <$> ask
+getSetFamily :: AnalysisSetFamily a b -> Verify s (a, IxedCell s a b)
+getSetFamily sf = (`getSetFamily'` sf) <$> get
+
+data Store s b = forall a. Ord a => MkStore a (IxedCell s a b)
+
+infixl 4 .$.
+(.$.) :: (a -> b) -> Store s a -> Verify s (Defined b)
+f .$. MkStore x c = liftST (fmap f <$> readIxedCellAt c x)
+
+infixl 4 .*.
+(.*.) :: Eq b => Verify s (Defined (a -> b)) -> Store s a -> Verify s (Defined b)
+fM .*. MkStore x c = do
+  fM >>= \case
+    Known f -> f .$. MkStore x c
+    Unknown -> pure Unknown
+    Inconsistent -> pure Inconsistent
+
+
+-- instance Apply (Store s) where
+--   MkStore xF f <*> MkStore xC c =
+
+readStore :: Store s b -> ST s (Defined b)
+readStore (MkStore x c) = readIxedCellAt c x
+
+constStore :: b -> Verify s (Store s b)
+constStore x = liftST (MkStore () <$> known x)
+
+-- constDefinedStore :: Defined b -> Verify s (Store b)
+-- constDefinedStore d = liftST (MkStore () <$> 
+
+evalSensExpr :: SensExpr -> Verify s (Store s SensExpr)
+evalSensExpr (SensAtom s) = constStore (SensAtom s)
+evalSensExpr (SensT n) = MkStore n . verifyInfoT <$> get
+
+-- type AnalysisExpr' s = AnalysisExpr (Store s)
+
+evalUnary :: (Eq a, Eq b, Eval f, Ord a) =>
+   (a -> b) -> f a -> Verify s (Store s b)
+evalUnary f x = do
+  MkStore xPoint x' <- eval x
+  r <- liftST unknown
+  liftST $ unaryAt2 xPoint () f x' r
+  return (MkStore () r)
+
+
+evalBinary :: (Eq b, Eq c, Eval f, Eval g, Ord a) =>
+   (a -> b -> c) -> f a -> g b -> Verify s (Store s c)
+evalBinary f x y = do
+  MkStore xPoint x' <- eval x
+  MkStore yPoint y' <- eval y
+  r <- liftST unknown
+  liftST $ binaryAt2 xPoint yPoint () f x' y' r
+  return (MkStore () r)
+
+evalTrinary :: (Ord a, Eq b, Eq c, Eq d, Eval f, Eval g, Eval h) =>
+  (a -> b -> c -> d) -> f a -> g b -> h c -> Verify s (Store s d)
+evalTrinary f x y z = do
+  MkStore xPoint x' <- eval x
+  MkStore yPoint y' <- eval y
+  MkStore zPoint z' <- eval z
+  r <- liftST unknown
+
+
+class Eval f where
+  eval :: f t -> Verify s (Store s t)
+
+instance Ord a => Eval (AnalysisSetFamily a) where
+  eval sf = uncurry MkStore <$> getSetFamily sf
+
+instance Eval (AnalysisExpr r) where
+  eval (SetFamily sf) = eval sf
+  eval (BaseVal b) = constStore b
+  eval (MonoidVal m) = evalSensExpr m
+  eval (BoolVal b) = constStore b
+  eval Empty = constStore mempty
+
+  eval (Union xs ys) = evalBinary Set.union xs ys
+  eval (UnionSingle xs x) = evalBinary Set.insert x xs
+  eval (Pair x y) = evalBinary (,) x y
+  eval (Fst p) = evalUnary fst p
+  eval (Snd p) = evalUnary snd p
+  eval (In x xs) = evalBinary Set.member x xs
+  eval (And x y) = evalBinary (&&) x y
+  eval (BaseEqual x y) = evalBinary (==) x y
+  eval (MonoidEqual x y) = evalBinary (==) x y
+  eval (Ite c t f) = evalBinary ifThenElse c t f
+
+ifThenElse :: Bool -> a -> a -> a
+ifThenElse True t _ = t
+ifThenElse False _ f = f
 
 class BuildVerifyInfo a where
   buildVerifyInfo :: a -> Verify s ()
 
 instance BuildVerifyInfo (AnalysisConstraint a) where
   buildVerifyInfo (SetFamily lhs :=: SetFamily rhs) = do
-    (lhsX, lhsCell) <- getSetFamily
-    (rhsX, rhsCell) <- getSetFamily
-    undefined
+    (lhsX, lhsCell) <- getSetFamily lhs
+    (rhsX, rhsCell) <- getSetFamily rhs
+
+    liftST $ sameAt2 lhsX rhsX lhsCell rhsCell
+
+  buildVerifyInfo (SetFamily lhs :=: Union xs ys) = undefined
+
   buildVerifyInfo (_ :>: _) = error "buildVerifyInfo: (:<:)"
 
 -- class GetVerifyInfoLens f where

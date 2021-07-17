@@ -43,11 +43,12 @@ instance Ppr NodeId where
   ppr (NodeId n) = 'n' : show n
 
 data Sensitivity = Public | Secret
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data SensExpr where
   SensAtom :: Sensitivity -> SensExpr
   SensT :: NodeId -> SensExpr
+  deriving (Eq, Ord)
 
 -- | The set family for this analysis
 data AnalysisSetFamily a b where
@@ -292,7 +293,7 @@ handleStmt e0@(CIf cond t f_maybe l) = do
   tell $
       [entryConstraint t
       ,(
-          let maybeUnion :: AnalysisSetFamily a (Set b)
+          let maybeUnion :: (Ord a, Ord b) => AnalysisSetFamily a (Set b)
                       -> (NodeId -> AnalysisSetFamily a (Set b))
                       -> Expr r Var SensExpr AnalysisSetFamily (Set b)
               maybeUnion x g =

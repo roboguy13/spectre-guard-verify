@@ -43,7 +43,7 @@ import           Pattern
 
 data SetE a
 
-class ElemVal r where
+class ElemVal (r :: * -> *) where
   type ElemRepr r :: * -> Constraint
 
 -- instance ElemVal f => ElemVal (SetE f) where
@@ -51,26 +51,26 @@ class ElemVal r where
 --   elemRepr _ = elemRepr (Proxy @a)
 
 data Expr r base m f t where
-  SetFamily :: f x (Set a) -> Expr r base m f (Set a)
-  BaseVal :: base -> Expr r base m f a
+  SetFamily :: (Ord x, Eq a) => f x (Set a) -> Expr r base m f (Set a)
+  BaseVal :: base -> Expr r base m f base
   MonoidVal :: m -> Expr r base m f m
   BoolVal :: Bool -> Expr r base m f Bool
 
-  VarRepr :: r -> Expr r base m f a -- For use in representing lambdas
+  VarRepr :: r a -> Expr r base m f a -- For use in representing lambdas
 
-  Pair :: Expr r base m f a -> Expr r base m f b -> Expr r base m f (a, b)
-  Fst :: Expr r base m f (a, b) -> Expr r base m f a
-  Snd :: Expr r base m f (a, b) -> Expr r base m f b
+  Pair :: (Ord a, Ord b) => Expr r base m f a -> Expr r base m f b -> Expr r base m f (a, b)
+  Fst :: (Ord a, Ord b) => Expr r base m f (a, b) -> Expr r base m f a
+  Snd :: (Ord a, Ord b) => Expr r base m f (a, b) -> Expr r base m f b
 
-  In :: Expr r base m f a -> Expr r base m f (Set a) -> Expr r base m f Bool
+  In :: Ord a => Expr r base m f a -> Expr r base m f (Set a) -> Expr r base m f Bool
   And :: Expr r base m f Bool -> Expr r base m f Bool -> Expr r base m f Bool
   BaseEqual :: Expr r base m f base -> Expr r base m f base -> Expr r base m f Bool
   MonoidEqual :: Expr r base m f m -> Expr r base m f m -> Expr r base m f Bool
   Ite :: Expr r base m f Bool -> Expr r base m f a -> Expr r base m f a -> Expr r base m f a
 
-  Union :: Expr r base m f (Set a) -> Expr r base m f (Set a) -> Expr r base m f (Set a)
-  UnionSingle :: Expr r base m f (Set a) -> Expr r base m f a -> Expr r base m f (Set a)
-  Empty :: (ElemVal r, ElemRepr r a) => Expr r base m f (Set a)
+  Union :: Ord a => Expr r base m f (Set a) -> Expr r base m f (Set a) -> Expr r base m f (Set a)
+  UnionSingle :: Ord a => Expr r base m f (Set a) -> Expr r base m f a -> Expr r base m f (Set a)
+  Empty :: (Ord a, ElemVal r, ElemRepr r a) => Expr r base m f (Set a)
 
   SetCompr :: (ElemVal r, ElemRepr r a, ElemRepr r b) => (forall r. Expr r base m f a -> Expr r base m f b) -> (forall r. Expr r base m f a -> Expr r base m f Bool) -> Expr r base m f (Set a) -> Expr r base m f (Set b)
 
@@ -83,9 +83,9 @@ class Value e v where
 
 instance Value (Expr r base m f base) base where value = BaseVal
 instance Value (Expr r base m f m) m where value = MonoidVal
-instance Value (Expr r base m f (Set a)) (f x (Set a)) where value = SetFamily
+instance (Ord x, Eq a) => Value (Expr r base m f (Set a)) (f x (Set a)) where value = SetFamily
 instance Value (Expr r base m f Bool) Bool where value = BoolVal
-instance (Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Expr r base m f (a, b)) (a, b) where
+instance (Ord a, Ord b, Value (Expr r base m f a) a, Value (Expr r base m f b) b) => Value (Expr r base m f (a, b)) (a, b) where
   value (x, y) = Pair (value x) (value y)
 
 -- pairVal :: (a, b) -> Expr r base m f (a, b)

@@ -173,6 +173,9 @@ knownAt p = MkIxedCell <$> newSTRef (pure (), pointMap p)
 unknown :: ST s (IxedCell s x a)
 unknown = MkIxedCell <$> newSTRef (pure (), MkMapDefined Unknown)
 
+inconsistent :: ST s (IxedCell s x a)
+inconsistent = MkIxedCell <$> newSTRef (pure (), MkMapDefined Inconsistent)
+
 readIxedCell :: IxedCell s x a -> ST s (MapDefined x a)
 readIxedCell (MkIxedCell ref) =
   snd <$> readSTRef ref
@@ -257,6 +260,16 @@ binaryWith modifyMD_xy modifyMD_yz f cA cB cC = do
     -- go :: MapDefined x a -> MapDefined x b -> MapDefined z c
     go g h = modifyMD_yz (f <$> g <.> h)
 
+trinaryWith :: forall s x y z w a b c d. (Ord x, Ord y, Ord z, Ord w, Eq a, Eq b, Eq c, Eq d) =>
+  (forall r. MapDefined x r -> MapDefined y r) -> (forall r. MapDefined y r -> MapDefined z r) -> (forall r. MapDefined z r -> MapDefined w r)
+  -> (a -> b -> c -> d) -> IxedCell s x a -> IxedCell s y b -> IxedCell s z c -> IxedCell s w d -> ST s ()
+trinaryWith modifyMD_xy modifyMD_yz modifyMD_zw f cA cB cC cD = do
+  watch cA $ \g -> do
+    readIxedCell cB >>= \h ->
+      updateDefined cC (go (modifyMD_xy g) h)
+
+
+
 binary :: forall s x a b c. (Ord x, Eq a, Eq b, Eq c) => (a -> b -> c) -> IxedCell s x a -> IxedCell s x b -> IxedCell s x c -> ST s ()
 binary = binaryWith id id
 
@@ -271,6 +284,12 @@ type Cell s = IxedCell s ()
 known :: a -> ST s (Cell s a)
 known x = knownAt ((), x)
 
+-- knownAt p = MkIxedCell <$> newSTRef (pure (), pointMap p)
+defined :: Eq a => Defined a -> ST s (Cell s a)
+defined (Known x) = MkIxedCell <$> newSTRef (pure (), pointMap ((), x))
+defined Unknown = MkIxedCell <$> newSTRef (pure (), mempty)
+defined Inconsistent = inconsistent
+
 readCell :: Cell s a -> ST s (Defined a)
 readCell c = readIxedCellAt c ()
 
@@ -278,6 +297,11 @@ sameAt :: (Ord x, Eq a) => x -> IxedCell s x a -> IxedCell s x a -> ST s ()
 sameAt x c1 c2 = do
   unaryAt x id c1 c2
   unaryAt x id c2 c1
+
+sameAt2 :: (Ord x, Ord y, Eq a) => x -> y -> IxedCell s x a -> IxedCell s y a -> ST s ()
+sameAt2 x y c1 c2 = do
+  unaryAt2 x y id c1 c2
+  unaryAt2 y x id c2 c1
 
 add :: (Ord x, Eq a, Num a) => IxedCell s x a -> IxedCell s x a -> IxedCell s x a -> ST s ()
 add cX cY cZ = do
